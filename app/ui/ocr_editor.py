@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -33,46 +33,64 @@ class OCREditor(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(7)
 
         self._tabs = QTabWidget()
+        self._tabs.setObjectName("editorTabs")
+        self._tabs.setDocumentMode(True)
+        self._tabs.setUsesScrollButtons(False)
 
         # tab 1: rolling context
         self._context_view = QPlainTextEdit()
+        self._context_view.setObjectName("textView")
         self._context_view.setReadOnly(True)
         self._context_view.setPlaceholderText("当前可见聊天上下文（开始监控后自动更新）")
         self._tabs.addTab(self._context_view, "当前聊天")
 
         # tab 2: raw OCR
         self._raw_view = QPlainTextEdit()
+        self._raw_view.setObjectName("textView")
         self._raw_view.setReadOnly(True)
         self._raw_view.setPlaceholderText("OCR 原文")
         self._tabs.addTab(self._raw_view, "OCR 原文")
 
         # tab 3: editable analysis text
         edit_container = QWidget()
+        edit_container.setObjectName("editTab")
         edit_layout = QVBoxLayout(edit_container)
-        edit_layout.setContentsMargins(4, 4, 4, 4)
-        edit_layout.setSpacing(4)
+        edit_layout.setContentsMargins(0, 0, 0, 0)
+        edit_layout.setSpacing(7)
         self._edit_view = QPlainTextEdit()
+        self._edit_view.setObjectName("textView")
         self._edit_view.setPlaceholderText("用于分析的文本（可直接修改，修改后点击「应用并分析」）")
         edit_layout.addWidget(self._edit_view, 1)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(6)
         self._edited_badge = QLabel("")
-        self._edited_badge.setObjectName("errorLabel")
+        self._edited_badge.setObjectName("editBadge")
         buttons.addWidget(self._edited_badge)
         buttons.addStretch(1)
-        restore_button = QPushButton("恢复 OCR 文本")
+
+        restore_button = QPushButton("恢复")
+        restore_button.setObjectName("quietButton")
+        restore_button.setToolTip("丢弃编辑，恢复为最近一次 OCR 识别的文本")
+        restore_button.setCursor(Qt.CursorShape.PointingHandCursor)
         restore_button.clicked.connect(self._on_restore)
-        copy_button = QPushButton("复制")
-        copy_button.clicked.connect(self._on_copy)
+
+        self._copy_button = QPushButton("复制")
+        self._copy_button.setToolTip("复制用于分析的文本")
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_button.clicked.connect(self._on_copy)
+
         apply_button = QPushButton("应用并分析")
         apply_button.setObjectName("primaryButton")
+        apply_button.setToolTip("以编辑后的文本立即触发一次分析")
+        apply_button.setCursor(Qt.CursorShape.PointingHandCursor)
         apply_button.clicked.connect(self._on_apply)
+
         buttons.addWidget(restore_button)
-        buttons.addWidget(copy_button)
+        buttons.addWidget(self._copy_button)
         buttons.addWidget(apply_button)
         edit_layout.addLayout(buttons)
         self._tabs.addTab(edit_container, "分析文本")
@@ -116,7 +134,7 @@ class OCREditor(QWidget):
             return
         self._override_active = active
         if active:
-            self._edited_badge.setText("已编辑 — 分析将使用编辑后文本")
+            self._edited_badge.setText("已编辑 · 分析将使用编辑后文本")
             self._tabs.setTabText(2, "分析文本 *")
         else:
             self._edited_badge.setText("")
@@ -138,3 +156,5 @@ class OCREditor(QWidget):
         from PySide6.QtWidgets import QApplication
 
         QApplication.clipboard().setText(self._edit_view.toPlainText())
+        self._copy_button.setText("已复制")
+        QTimer.singleShot(1200, lambda: self._copy_button.setText("复制"))

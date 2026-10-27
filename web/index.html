@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<script>document.documentElement.classList.add("js");</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>言外 · 把谜语人的话，翻译成人话</title>
+<meta name="description" content="言外是一个按需对话解码器：粘贴完整聊天记录，或框选一次屏幕，结合长文上下文、表情包与截图，读懂谜语人的言外之意，并给出可接住的回复。不持续监控，截图不落盘，回复不代发。">
+<meta name="theme-color" content="#05060a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="言外 · 把谜语人的话，翻译成人话">
+<meta property="og:description" content="按需对话解码：长文理解 + 表情包视觉 + 谜语人式暗示分析。不持续监控，截图不落盘，回复不代发。">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a0c13'/%3E%3Cpath d='M18 24a8 8 0 0 1 8-8h12a8 8 0 0 1 8 8v10a8 8 0 0 1-8 8h-9l-7 6v-6.4A8 8 0 0 1 18 34z' fill='none' stroke='%2367e8f9' stroke-width='3'/%3E%3Cpath d='M25 29h14M25 35h8' stroke='%23c084fc' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4.5 12h14M12.5 5.5 19 12l-6.5 6.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M9 6.5v11l9-5.5z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 6.5V5.5A2.5 2.5 0 0 0 12.5 3H5.5A2.5 2.5 0 0 0 3 5.5v7A2.5 2.5 0 0 0 5.5 15h1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v6c0 4.2 2.9 7.3 7 8.5 4.1-1.2 7-4.3 7-8.5V6z"/><path d="m9 12 2.2 2.2L15 10.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M20 8.5V6a2 2 0 0 0-2-2h-2.5M4 15.5V18a2 2 0 0 0 2 2h2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5M3.5 12h17"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 8 4.5-8 4.5-8-4.5z"/><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5.5 13.5H11l-1 7.5 8-11H12.5z"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M10 3v3.5M14 3v3.5M10 17.5V21M14 17.5V21M3 10h3.5M3 14h3.5M17.5 10H21M17.5 14H21"/></symbol>
+  <symbol id="i-window" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9.5h18M7 7h.01M10 7h.01"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 2-5.6 2L12 20.5 10.1 13 4.5 11l5.6-2z"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3.5 3.5l17 17"/><path d="M9.8 5.4A9.8 9.8 0 0 1 12 5.2c5.3 0 8.7 5 8.7 6.8 0 .9-.9 2.6-2.6 4.1M6.4 7.6C4.6 9.1 3.3 10.9 3.3 12c0 1.9 3.4 6.8 8.7 6.8 1.3 0 2.4-.3 3.5-.8"/><path d="M10.2 10.3a2.5 2.5 0 0 0 3.5 3.5"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+</svg>
+
+<div class="grain" aria-hidden="true"></div>
+<div class="cursor-glow" aria-hidden="true"></div>
+<div class="scroll-progress" aria-hidden="true"><span id="scrollBar"></span></div>
+
+<header class="site-header" id="siteHeader">
+  <div class="container nav-wrap">
+    <a class="brand" href="#top" aria-label="言外 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M7 12a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-5l-4.5 4v-4.2A5 5 0 0 1 7 18z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 13h8M12 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-text"><b>言外</b><i>YANWAI · CONVERSATION DECODER</i></span>
+    </a>
+    <nav class="nav" id="navLinks" aria-label="主导航">
+      <a href="#features">能力</a>
+      <a href="#architecture">流程</a>
+      <a href="#privacy">隐私</a>
+      <a href="#start">快速开始</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="btn btn-ghost btn-sm" href="#start">快速开始</a>
+      <a class="btn btn-primary btn-sm" href="#start">开始解读<svg class="icon"><use href="#i-arrow"/></svg></a>
+    </div>
+    <button class="nav-toggle" id="navToggle" type="button" aria-label="打开导航菜单" aria-expanded="false" aria-controls="navLinks">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ HERO ============ -->
+<section class="hero" id="top">
+  <div class="hero-bg" aria-hidden="true">
+    <div class="aurora aurora-1"></div>
+    <div class="aurora aurora-2"></div>
+    <div class="aurora aurora-3"></div>
+    <div class="hero-grid"></div>
+    <div class="hero-beam"></div>
+  </div>
+
+  <div class="container hero-inner">
+    <div class="hero-copy">
+      <span class="eyebrow reveal"><i class="live-dot"></i>WINDOWS · 按需解读 · 不持续监控</span>
+      <h1 class="reveal" data-delay="1">把谜语人的话，<br><span class="grad-text">翻译成人话</span></h1>
+      <p class="lead reveal" data-delay="2">粘贴完整聊天记录，或框选一次屏幕。言外会把长文上下文、表情包/贴纸和对方那句半真半假的话放在一起看，拆出暗示、反话、试探与潜台词，再给你几条能直接接住的回复。不持续监控，不逐帧打扰。</p>
+      <div class="hero-cta reveal" data-delay="3">
+        <a class="btn btn-primary btn-lg" href="#start">看看怎么用<svg class="icon"><use href="#i-arrow"/></svg></a>
+        <a class="btn btn-glass btn-lg" href="#features"><svg class="icon"><use href="#i-layers"/></svg>它能读懂什么</a>
+      </div>
+      <dl class="hero-stats reveal" data-delay="4">
+        <div><dt><span data-count="1">0</span> 次</dt><dd>按需解读</dd></div>
+        <div><dt><span data-count="30">0</span>k</dt><dd>长文字符上限</dd></div>
+        <div><dt><span data-count="4">0</span> 张</dt><dd>可追加画面</dd></div>
+        <div><dt><span data-count="0">0</span></dt><dd>持续监控 / 截图落盘</dd></div>
+      </dl>
+      <p class="hero-note reveal" data-delay="5">默认快速解读；需要更深的推敲时再打开「深度思考」。<code>.\run.ps1 --mock-llm</code> 可无 Key 体验。</p>
+    </div>
+
+    <div class="hero-visual reveal" data-delay="2">
+      <div class="visual-halo" aria-hidden="true"></div>
+      <div class="float-card float-a" aria-hidden="true">
+        <span class="float-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
+        <div><b>按需才发送</b><i>不点击解读 · 不上传</i></div>
+      </div>
+      <div class="float-card float-b" aria-hidden="true">
+        <span class="float-icon alt"><svg class="icon"><use href="#i-check"/></svg></span>
+        <div><b>表情包也看得懂</b><i>视觉理解 · 贴纸 / emoji</i></div>
+      </div>
+
+      <div class="app-window" id="heroWindow">
+        <div class="win-bar">
+          <span class="win-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="win-title">言外 · 一次解读</span>
+          <span class="win-pin">置顶</span>
+        </div>
+        <div class="win-meta">
+          <span class="win-live"><i class="pulse-dot"></i>已读取</span>
+          <span class="win-sep"></span>
+          <span>长文 1.2k 字</span>
+          <span class="win-sep"></span>
+          <span>画面 1 张</span>
+          <span class="win-gen">视觉 <b>ON</b></span>
+        </div>
+        <div class="win-body">
+          <div class="mini-chat" aria-hidden="true">
+            <div class="mini-day">18:41</div>
+            <div class="bubble bubble-them enter">在忙吗？</div>
+            <div class="bubble bubble-me enter">刚开完会</div>
+            <div class="bubble bubble-them enter">你周末有空吗？那个新展好像快结束了</div>
+            <div class="bubble bubble-them typing enter"><i></i><i></i><i></i></div>
+          </div>
+          <div class="mini-panel" aria-hidden="true">
+            <div class="updating-line"><span class="mini-spinner"></span>正在理解长文与画面…</div>
+            <article class="mini-card">
+              <header><em></em>当前理解</header>
+              <p>对方提出周末邀约，用「快结束了」制造一点时间压力。</p>
+            </article>
+            <div class="mini-row">
+              <article class="mini-card">
+                <header><em></em>情绪</header>
+                <div class="emo-line">
+                  <span class="emo-ring" style="--v:.71"><span>71%</span></span>
+                  <span>期待 · 轻微紧张</span>
+                </div>
+              </article>
+              <article class="mini-card">
+                <header><em></em>可能意图</header>
+                <ul><li>试探你的兴趣</li><li>尽快敲定时间</li></ul>
+              </article>
+            </div>
+            <article class="mini-card mini-reply">
+              <header><em></em>建议回复<span class="tag">轻快</span></header>
+              <p>有空！周六下午怎么样？</p>
+              <button class="mini-copy" type="button" tabindex="-1">复制</button>
+            </article>
+          </div>
+        </div>
+        <div class="win-foot">
+          <span class="foot-hint"><svg class="icon"><use href="#i-scan"/></svg><kbd>Ctrl</kbd><kbd>Enter</kbd> 解读</span>
+          <span class="foot-actions"><i>再读一次</i><b>复制回复</b></span>
+        </div>
+      </div>
+      <div class="panel-reflection" aria-hidden="true"></div>
+    </div>
+  </div>
+  <div class="hero-fade" aria-hidden="true"></div>
+</section>
+
+<!-- ============ MARQUEE ============ -->
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track" id="marqueeTrack">
+    <span>按需解读</span><i>✦</i>
+    <span>截图不落盘</span><i>✦</i>
+    <span>长文上下文</span><i>✦</i>
+    <span>表情包 / 贴纸视觉</span><i>✦</i>
+    <span>谜语人式暗示分析</span><i>✦</i>
+    <span>快速 / 深度可选</span><i>✦</i>
+    <span>Pydantic 结构化输出</span><i>✦</i>
+    <span>OpenAI-compatible</span><i>✦</i>
+    <span>Windows 凭据管理器</span><i>✦</i>
+    <span>一键复制 · 绝不代发</span><i>✦</i>
+    <span>不读心，只读语境</span><i>✦</i>
+  </div>
+</div>
+
+<!-- ============ FEATURES ============ -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow"><i class="live-dot"></i>能力清单</span>
+      <h2>不持续监控，只在你点击解读时</h2>
+      <p class="lead">言外不是盯屏软件，而是一次性的深读工具：你把长文或画面交给它，它把言外之意拆开给你。</p>
+    </div>
+
+    <div class="features-grid">
+      <article class="feature card-ocr reveal">
+        <div class="feature-top">
+          <span class="feature-icon"><svg class="icon"><use href="#i-scan"/></svg></span>
+          <span class="feature-kicker">LOCAL OCR</span>
+        </div>
+        <h3>本地 OCR，按需读取</h3>
+        <p>PaddleOCR PP-OCRv6 在 CPU 上完成中英文识别；只有你点击「读取画面」时才截一次，不持续采样、不循环调用。截图用完即释放，从不写入磁盘。</p>
+        <div class="fx fx-ocr" aria-hidden="true">
+          <div class="ocr-doc">
+            <span class="ocr-box" style="--d:0s">你周末有空吗？</span>
+            <span class="ocr-box" style="--d:.18s">那个新展好像快结束了</span>
+            <span class="ocr-box" style="--d:.36s">周六下午怎么样？</span>
+            <span class="ocr-tag">conf 0.982</span>
+          </div>
+        </div>
+        <div class="tags"><span>PP-OCRv6</span><span>按需一次</span><span>mss · 仅内存</span></div>
+      </article>
+
+      <article class="feature card-diff reveal" data-delay="1">
+        <div class="feature-top">
+          <span class="feature-icon alt"><svg class="icon"><use href="#i-cpu"/></svg></span>
+          <span class="feature-kicker">LONG CONTEXT</span>
+        </div>
+        <h3>长文理解：把整段对话读完</h3>
+        <p>最多 30,000 字（可调）。先梳理双方关系、话题线与情绪转折，再解释最后一句——不是只看最后一屏。</p>
+        <div class="fx fx-diff" aria-hidden="true">
+          <div class="diff-rows">
+            <div class="diff-row same"><i>01</i><span>双方关系 / 最近话题线</span><b>全文</b></div>
+            <div class="diff-row add"><i>02</i><span>情绪变化与最后一次转折</span><b>线索</b></div>
+            <div class="diff-row changed"><i>03</i><span>最后一句的暗示 / 试探</span><b>解读</b></div>
+          </div>
+        </div>
+        <div class="tags"><span>30k 字</span><span>人物关系</span><span>话题线</span></div>
+      </article>
+
+      <article class="feature card-debounce reveal">
+        <div class="feature-top">
+          <span class="feature-icon warm"><svg class="icon"><use href="#i-bolt"/></svg></span>
+          <span class="feature-kicker">STICKERS / VISION</span>
+        </div>
+        <h3>表情包也是句子</h3>
+        <p>OCR 只能读字，读不懂贴纸。言外把画面一起交给视觉模型，解释猫猫歪头、沉默、表情包背后的态度与潜台词。</p>
+        <div class="fx fx-debounce" aria-hidden="true">
+          <div class="diff-rows">
+            <div class="diff-row same"><i>🐱</i><span>猫猫歪头 · 试探 / 撒娇</span><b>表情</b></div>
+            <div class="diff-row add"><i>😶</i><span>「算了」· 退让 / 等挽留</span><b>潜台词</b></div>
+          </div>
+        </div>
+        <div class="tags"><span>表情包</span><span>贴纸 / emoji</span><span>图片</span></div>
+      </article>
+
+      <article class="feature card-schema reveal" data-delay="1">
+        <div class="feature-top">
+          <span class="feature-icon violet"><svg class="icon"><use href="#i-layers"/></svg></span>
+          <span class="feature-kicker">SCHEMA</span>
+        </div>
+        <h3>结构化结果，快慢可选</h3>
+        <p>默认快速模式，只给简短思考摘要；需要更深的推敲时再打开「深度思考」。输出仍包含证据、替代解释和 3 条回复。</p>
+        <div class="fx fx-schema" aria-hidden="true">
+          <pre><code><span class="tok-k">surface_meaning</span>: <span class="tok-s">"周末邀约 + 时间压力"</span>
+<span class="tok-k">emotion</span>: <span class="tok-s">"期待 · 紧张"</span> <span class="tok-n">0.71</span>
+<span class="tok-k">suggested_replies</span>: <span class="tok-n">[3]</span>
+<span class="tok-k">uncertainty</span>: <span class="tok-s">"地点未知"</span></code></pre>
+        </div>
+        <div class="tags"><span>Pydantic v2</span><span>思考 / 证据 / 替代解释</span></div>
+      </article>
+
+      <article class="feature card-clip reveal" data-delay="2">
+        <div class="feature-top">
+          <span class="feature-icon pink"><svg class="icon"><use href="#i-copy"/></svg></span>
+          <span class="feature-kicker">NO AUTO-SEND</span>
+        </div>
+        <h3>只复制，不代发</h3>
+        <p>回复建议安静地躺在剪贴板里等你。程序永远不会自动粘贴、自动发送任何消息。</p>
+        <div class="fx fx-clip" aria-hidden="true">
+          <div class="clip-row"><span class="clip-style">轻快</span><p>有空！周六下午怎么样？</p><span class="clip-btn">复制</span></div>
+          <div class="clip-row"><span class="clip-style">保留</span><p>我应该可以，等我确认下时间～</p><span class="clip-btn">复制</span></div>
+          <div class="clip-done"><svg class="icon"><use href="#i-check"/></svg>已复制到剪贴板</div>
+        </div>
+        <div class="tags"><span>2–3 条语气</span><span>剪贴板</span></div>
+      </article>
+
+      <article class="feature card-window reveal">
+        <div class="feature-top">
+          <span class="feature-icon"><svg class="icon"><use href="#i-window"/></svg></span>
+          <span class="feature-kicker">MULTI-CAPTURE</span>
+        </div>
+        <h3>聊天太长，就再读一次</h3>
+        <p>向上滚动聊天记录，再点一次「读取画面」即可追加文本和截图；最多保留 4 张画面，长记录不会被一屏截断。</p>
+        <div class="fx fx-window" aria-hidden="true">
+          <div class="win-stack">
+            <span class="stack-win back"></span>
+            <span class="stack-win mid"></span>
+            <span class="stack-win front">
+              <i class="stack-bar"></i><i class="stack-line w1"></i><i class="stack-line w2"></i><i class="stack-line w3"></i>
+            </span>
+            <span class="pin-chip">PINNED</span>
+          </div>
+        </div>
+        <div class="tags"><span>追加读取</span><span>最多 4 张画面</span></div>
+      </article>
+
+      <article class="feature card-security reveal" data-delay="1">
+        <div class="feature-top">
+          <span class="feature-icon green"><svg class="icon"><use href="#i-lock"/></svg></span>
+          <span class="feature-kicker">CREDENTIALS</span>
+        </div>
+        <h3>密钥进系统钥匙串</h3>
+        <p>API Key 存入 Windows 凭据管理器，不硬编码、不进 Git、不写日志；<code>.env</code> 只作开发回退。</p>
+        <div class="fx fx-keyring" aria-hidden="true">
+          <div class="keyring-badge"><svg class="icon"><use href="#i-shield"/></svg>Windows Credential Manager</div>
+          <div class="key-dots"><span></span><span></span><span></span><span></span><span></span><span></span><em>sk-••••••••</em></div>
+        </div>
+        <div class="tags"><span>keyring</span><span>env &gt; keyring &gt; config</span></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section class="section" id="architecture">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow"><i class="live-dot"></i>架构</span>
+      <h2>一次读取，一次深读</h2>
+      <p class="lead">没有常驻的采样循环。读取、OCR、图像压缩与模型请求都在后台线程完成；结果经 Schema 校验后才进入界面。</p>
+    </div>
+
+    <div class="arch-grid">
+      <ol class="pipeline reveal">
+        <li class="pipe-node">
+          <span class="pipe-index">01</span>
+          <div class="pipe-body">
+            <h3>粘贴或读取一次</h3>
+            <p>长聊天直接粘贴；也可以框选一次聊天窗口，只读取这一块，不会后台扫屏。</p>
+            <div class="pipe-meta"><span>粘贴</span><span>mss 一次</span><span>DPI 换算</span></div>
+          </div>
+        </li>
+        <li class="pipe-node">
+          <span class="pipe-index">02</span>
+          <div class="pipe-body">
+            <h3>本地 OCR + 行结构</h3>
+            <p>PaddleOCR 识别后保留行结构，让「对方 / 我」的说话人标签不被压成一行。</p>
+            <div class="pipe-meta"><span>PP-OCRv6</span><span>中文 / 英文</span><span>CPU</span></div>
+          </div>
+        </li>
+        <li class="pipe-node">
+          <span class="pipe-index">03</span>
+          <div class="pipe-body">
+            <h3>长文整理</h3>
+            <p>整理全文、截断过长部分，并把多张截图编码为压缩 JPEG，准备一次请求。</p>
+            <div class="pipe-meta"><span>30k 字</span><span>4 张画面</span><span>JPEG</span></div>
+          </div>
+        </li>
+        <li class="pipe-node">
+          <span class="pipe-index">04</span>
+          <div class="pipe-body">
+            <h3>视觉 + 语义解读</h3>
+            <p>长文与画面一起交给模型：先找证据，再区分谜语、反话与试探，最后给回复。</p>
+            <div class="pipe-meta"><span>快速 / 深度</span><span>视觉</span><span>JSON 修复重试</span></div>
+          </div>
+        </li>
+        <li class="pipe-node">
+          <span class="pipe-index">05</span>
+          <div class="pipe-body">
+            <h3>结果与回复</h3>
+            <p>Pydantic 校验通过后一次性上屏；回复建议只复制，不自动发送。</p>
+            <div class="pipe-meta"><span>Pydantic v2</span><span>证据 / 替代解释</span><span>复制</span></div>
+          </div>
+        </li>
+      </ol>
+
+      <div class="code-panel reveal" data-delay="1">
+        <div class="code-head">
+          <span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="code-tabs" role="tablist" aria-label="实现细节">
+            <button class="code-tab is-active" type="button" role="tab" aria-selected="true" data-tab="result">analysis.json</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-tab="decoder">decoder.py</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-tab="prompt">system_prompt.md</button>
+          </div>
+        </div>
+        <div class="code-body">
+          <div class="code-pane is-active" data-pane="result" role="tabpanel">
+<pre><code><span class="tok-p">{</span>
+  <span class="tok-k">"surface_meaning"</span><span class="tok-p">:</span> <span class="tok-s">"对方提出周末邀约，用「快结束了」制造一点时间压力。"</span><span class="tok-p">,</span>
+  <span class="tok-k">"possible_intent"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"邀请你一起去看展"</span><span class="tok-p">,</span> <span class="tok-s">"试探你的兴趣强度"</span><span class="tok-p">],</span>
+  <span class="tok-k">"emotion"</span><span class="tok-p">:</span> <span class="tok-p">{</span> <span class="tok-k">"label"</span><span class="tok-p">:</span> <span class="tok-s">"期待 · 轻微紧张"</span><span class="tok-p">,</span> <span class="tok-k">"confidence"</span><span class="tok-p">:</span> <span class="tok-n">0.71</span> <span class="tok-p">},</span>
+  <span class="tok-k">"potential_needs"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"得到明确答复"</span><span class="tok-p">,</span> <span class="tok-s">"不想显得太主动"</span><span class="tok-p">],</span>
+  <span class="tok-k">"reply_strategy"</span><span class="tok-p">:</span> <span class="tok-s">"先给态度，再给候选时段；不要只回「看看」。"</span><span class="tok-p">,</span>
+  <span class="tok-k">"suggested_replies"</span><span class="tok-p">:</span> <span class="tok-p">[</span>
+    <span class="tok-p">{</span> <span class="tok-k">"style"</span><span class="tok-p">:</span> <span class="tok-s">"轻快"</span><span class="tok-p">,</span> <span class="tok-k">"text"</span><span class="tok-p">:</span> <span class="tok-s">"有空！周六下午怎么样？"</span> <span class="tok-p">},</span>
+    <span class="tok-p">{</span> <span class="tok-k">"style"</span><span class="tok-p">:</span> <span class="tok-s">"保留"</span><span class="tok-p">,</span> <span class="tok-k">"text"</span><span class="tok-p">:</span> <span class="tok-s">"应该可以，等我确认下时间～"</span> <span class="tok-p">}</span>
+  <span class="tok-p">],</span>
+  <span class="tok-k">"uncertainty"</span><span class="tok-p">:</span> <span class="tok-s">"无法确认展览的地点与时长，未做过度推断。"</span>
+<span class="tok-p">}</span></code></pre>
+          </div>
+          <div class="code-pane" data-pane="decoder" role="tabpanel" hidden>
+<pre><code><span class="tok-c"># 按需一次：不启动采样循环，不持有历史帧</span>
+<span class="tok-k">def</span> <span class="tok-f">decode</span><span class="tok-p">(</span>text<span class="tok-p">,</span> images<span class="tok-p">):</span>
+    text <span class="tok-p">=</span> clamp<span class="tok-p">(</span>text<span class="tok-p">,</span> max_chars<span class="tok-p">=</span><span class="tok-n">30000</span><span class="tok-p">)</span>   <span class="tok-c"># 保留最近部分</span>
+    images <span class="tok-p">=</span> images<span class="tok-p">[</span><span class="tok-p">-</span><span class="tok-n">4</span><span class="tok-p">:]</span>                     <span class="tok-c"># 最多 4 张</span>
+    worker <span class="tok-p">=</span> DecodeWorker<span class="tok-p">(</span>text<span class="tok-p">,</span> images<span class="tok-p">,</span> deep<span class="tok-p">=</span><span class="tok-k">False</span><span class="tok-p">)</span>
+    worker<span class="tok-p">.</span>start<span class="tok-p">()</span>                        <span class="tok-c"># UI 不阻塞</span>
+
+<span class="tok-c"># 结果经 Pydantic 校验后才交给界面；</span>
+<span class="tok-c"># 不监控、不防抖、不重复调用。</span></code></pre>
+</div>
+          <div class="code-pane" data-pane="prompt" role="tabpanel" hidden>
+<pre><code><span class="tok-c"># System Prompt 摘要（app/llm/prompt.py）</span>
+你是一名克制、细致的对话解码器，擅长读懂谜语人。
+
+<span class="tok-p">-</span> <span class="tok-s">不读心</span>：不声称知道对方真实想法。
+<span class="tok-p">-</span> 每个结论都要能在原文里找到依据。
+<span class="tok-p">-</span> 无法确定时写进 uncertainty，
+  而不是编一个听起来合理的答案。
+<span class="tok-p">-</span> 回复建议给 2–3 条不同语气，
+  让用户自己选择并复制。
+<span class="tok-p">-</span> 表情包/贴纸/图片必须解释其情绪与潜台词。
+<span class="tok-p">-</span> 长对话先梳理关系、话题线与最近转折。
+<span class="tok-p">-</span> 不评判任何一方，不提供操控性话术。</code></pre>
+          </div>
+        </div>
+        <div class="code-foot"><span>按需一次：UI / OCR worker / LLM worker</span><span class="code-foot-right"><i class="pulse-dot tiny"></i>Qt Signal · Slot</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRIVACY ============ -->
+<section class="section" id="privacy">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow"><i class="live-dot"></i>隐私边界</span>
+      <h2>不读心，只读语境</h2>
+      <p class="lead">我们不假装能看穿任何人。每个结论都附带「不确定性」，判断权始终在你手里；隐私边界也一样，说清楚哪一条数据去了哪里。</p>
+    </div>
+
+    <div class="privacy-grid">
+      <article class="privacy-card leaves reveal">
+        <header>
+          <span class="privacy-icon"><svg class="icon"><use href="#i-arrow"/></svg></span>
+          <div><h3>只在你点击「解读」时发送</h3><p>发给用户自己配置的 LLM 接口</p></div>
+        </header>
+        <ul>
+          <li><span>整段对话文本<small>你粘贴的全文 + OCR 读取的文字</small></span><em>01</em></li>
+          <li><span>你主动附带的聊天画面<small>最多 4 张 · JPEG · 默认开启，可关</small></span><em>02</em></li>
+          <li><span>固定的 System Prompt</span><em>03</em></li>
+          
+        </ul>
+        <pre class="payload-mini" aria-label="发送给模型的内容示意"><span class="pm-tag">system</span> 你是一名克制、细致的对话解码器…
+<span class="pm-tag">user</span>   [完整对话] 对方：在忙吗？ / 我：刚开完会 / 对方：你周末有空吗…
+         [画面] 1 张聊天截图（可能含表情包）
+<span class="pm-tag">image</span> JPEG · 仅本次解读 · 可关闭</pre>
+        <p class="privacy-foot">不持续监控。只有点击「解读」时才会发送；不读取微信 / QQ 内部数据，不后台扫描屏幕。</p>
+      </article>
+
+      <article class="privacy-card stays reveal" data-delay="1">
+        <header>
+          <span class="privacy-icon green"><svg class="icon"><use href="#i-shield"/></svg></span>
+          <div><h3>不会离开这台电脑的部分</h3><p>截图零落盘，密钥进系统钥匙串</p></div>
+        </header>
+        <ul>
+          <li><span>屏幕截图<small>只在你主动读取并解读时发送；从不写磁盘</small></span><em>01</em></li>
+          <li><span>长文编辑器<small>只保存在本次运行内存</small></span><em>02</em></li>
+          <li><span>API Key<small>Windows 凭据管理器</small></span><em>03</em></li>
+          <li><span>日志<small>不含 Key 与完整聊天内容</small></span><em>04</em></li>
+        </ul>
+        <p class="privacy-foot">日志目录：<code>%APPDATA%\OCRChatAssistant\logs\</code></p>
+      </article>
+    </div>
+
+    <blockquote class="quote reveal">
+      <p>“我们不假装读心。每个结论都带着<strong>不确定性</strong>一起交给你。”</p>
+      <cite>— 产品设计原则 · System Prompt 中不可移除的一段</cite>
+    </blockquote>
+  </div>
+</section>
+
+<!-- ============ QUICK START ============ -->
+<section class="section" id="start">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow"><i class="live-dot"></i>快速开始</span>
+      <h2>三分钟，从长文 / 框选到第一份解读</h2>
+      <p class="lead">Windows 10 / 11 · Python 3.11 或 3.12。无需联网即可体验界面与全链路（模型文件首次下载除外）。</p>
+    </div>
+
+    <div class="steps">
+      <article class="step reveal">
+        <span class="step-num">01</span>
+        <h3>准备环境</h3>
+        <p>一键脚本创建 <code>.venv</code>、安装依赖并验证核心 import。</p>
+        <div class="cmd"><code>.\setup.ps1</code><button class="copy-btn" type="button" data-copy=".\setup.ps1" aria-label="复制安装命令"><svg class="icon"><use href="#i-copy"/></svg></button></div>
+        <span class="step-note">首次运行会下载 OCR 模型（约 100MB）</span>
+      </article>
+
+      <article class="step reveal" data-delay="1">
+        <span class="step-num">02</span>
+        <h3>先跑 Mock 演示</h3>
+        <p>没有 API Key 也能看完整界面、长文编辑与思考摘要；模型内容来自 Mock。</p>
+        <div class="cmd"><code>.\run.ps1 --mock-llm</code><button class="copy-btn" type="button" data-copy=".\run.ps1 --mock-llm" aria-label="复制演示命令"><svg class="icon"><use href="#i-copy"/></svg></button></div>
+        <span class="step-note">调试日志加 <code>--debug</code></span>
+      </article>
+
+      <article class="step reveal" data-delay="2">
+        <span class="step-num">03</span>
+        <h3>粘贴或读取画面</h3>
+        <p>把完整聊天记录粘贴进左侧；或点击「读取画面」框选一次聊天窗口。聊天太长就向上滚动再读一次，文本和画面会追加。</p>
+        <div class="keys-row">
+          <span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd> 读取画面</span>
+          <span><kbd>Ctrl</kbd><kbd>Enter</kbd> 解读</span>
+          <span><kbd>Esc</kbd> 取消</span>
+        </div>
+        <span class="step-note">默认快速解读；需要深读再开「深度思考」</span>
+      </article>
+    </div>
+
+    <div class="launch-bar reveal">
+      <span class="launch-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M7 12a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-5l-4.5 4v-4.2A5 5 0 0 1 7 18z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 13h8M12 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+      <div class="launch-copy">
+        <h3>在浏览器里直接打开桌面端</h3>
+        <p>注册一次本地协议 <code>yanwai://</code>，本页按钮即可唤起 Windows 程序。首次使用请复制注册命令，在项目根目录运行一次。</p>
+      </div>
+      <div class="launch-actions">
+        <a class="btn btn-primary" id="launchDesktop" href="yanwai://launch">启动桌面端<svg class="icon"><use href="#i-arrow"/></svg></a>
+        <button class="launch-setup" type="button" data-copy=".\web\register-protocol.ps1">没有反应？复制注册命令</button>
+        <span class="launch-hint">yanwai://launch · 仅 Windows 本机</span>
+      </div>
+    </div>
+    <div class="req-strip reveal">
+      <span><svg class="icon"><use href="#i-monitor"/></svg>Windows 10 / 11</span>
+      <span><svg class="icon"><use href="#i-cpu"/></svg>Python 3.11 / 3.12</span>
+      <span><svg class="icon"><use href="#i-layers"/></svg>PySide6 6.11</span>
+      <span><svg class="icon"><use href="#i-scan"/></svg>PaddleOCR 3.7 · PP-OCRv6</span>
+      <span><svg class="icon"><use href="#i-shield"/></svg>按需 · 本地优先</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="section" id="faq">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow"><i class="live-dot"></i>常见问题</span>
+      <h2>先说清楚，再决定用不用</h2>
+      <p class="lead">包括它的限制。一个只展示优点的介绍页，不值得你信任。</p>
+    </div>
+    <div class="faq-list reveal" data-delay="1">
+      <div class="faq-item is-open">
+        <button class="faq-q" type="button" aria-expanded="true"><span>需要 API Key 才能用吗？</span><i></i></button>
+        <div class="faq-a"><div><p>不需要。启动时加 <code>--mock-llm</code> 会使用内置的 Mock 客户端，完整跑通长文编辑、读取画面、视觉编码与结果面板，只是分析内容来自模拟数据。真正接入时，在设置里填任意 OpenAI-compatible 的 Base URL、Model 和 Key 即可。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>它会把我的聊天截图传到服务器吗？</span><i></i></button>
+        <div class="faq-a"><div><p>只有你点击「解读」时才会。言外不会持续监控，也不会后台扫屏；你手动读取的画面会压缩成 JPEG，和整段对话一起发送给你配置的模型服务商。视觉默认开启（因为表情包/贴纸是言外的核心），可在「设置 → 解读」里关闭；关闭后画面只在本地预览，不发任何图片。截图从不写入磁盘。</p></div></div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>对方发表情包，它能看懂吗？</span><i></i></button>
+        <div class="faq-a"><div><p>能，前提是模型支持视觉输入（当前配置的 qwen3.7-plus 已实测支持）。OCR 只能读出文字，所以言外会把画面一起交给视觉模型，让它在证据里解释「猫猫歪头」「沉默」「狗头」这类表情、贴纸和图片的情绪与潜台词，而不是当成装饰跳过。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>支持微信、QQ、Discord 吗？</span><i></i></button>
+        <div class="faq-a"><div><p>任何能显示在屏幕上的聊天窗口都可以框选，因为它只处理你框选区域里的像素，不读取应用内部数据。Discord / Telegram / 网页版聊天同样适用。小字体、深色模式或表情较多的界面可能影响 OCR 效果，可调整框选范围。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>聊天太长、滚出画面怎么办？</span><i></i></button>
+        <div class="faq-a"><div><p>两个办法：把完整聊天记录直接粘贴进左侧编辑器（默认支持 30,000 字，可在设置里调）；或者向上滚动聊天记录，再点一次「读取画面」，程序会把新文字追加到已有内容里，并保留最多 4 张截图。长文不会因为一屏装不下就丢掉前文。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>会不会自动帮我回复？</span><i></i></button>
+        <div class="faq-a"><div><p>不会。回复建议只会在你点击「复制」时进入剪贴板，之后由你自己粘贴和发送。程序没有自动粘贴、自动发送、模拟按键的能力。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>OCR 认错了怎么办？</span><i></i></button>
+        <div class="faq-a"><div><p>左侧就是可编辑的对话文本：OCR 读取后可以直接改，再点「解读」。建议保留「对方：」「我：」这样的说话人标签；如果 OCR 把行粘在一起，也可以手动换行。程序不会拿改过的文本去覆盖你的编辑。</p></div></div>
+      </div>
+
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>为什么「深度思考」比较慢？</span><i></i></button>
+        <div class="faq-a"><div><p>深度模式会让推理模型展开更长的思考，实测约 30–60 秒；默认关闭。快速模式直接要求 3–5 条简短步骤和结论，本机实测约 25 秒。需要更稳的长文推理时再打开深度思考，日常聊天用快速模式即可。</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" type="button" aria-expanded="false"><span>为什么结论有时看起来很含糊？</span><i></i></button>
+        <div class="faq-a"><div><p>因为模型只被允许根据可见文字推断。当证据不足时，它会把「我确定不了什么」写进「不确定性」字段，而不是编一个听起来很确定的故事。这是刻意的设计选择，也是它比「读心型」工具更安全的原因。</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-panel reveal">
+      <div class="cta-aurora" aria-hidden="true"></div>
+      <span class="eyebrow"><i class="live-dot"></i>WINDOWS · 现在可用</span>
+      <h2>让下一句，<span class="grad-text">先被读懂</span>。</h2>
+      <p>粘贴长文，或读取一次画面。剩下的交给它：本地 OCR、表情包视觉、结构化解读、一键复制。</p>
+      <div class="cta-actions">
+        <a class="btn btn-primary btn-lg" href="#start">查看快速开始<svg class="icon"><use href="#i-arrow"/></svg></a>
+        <a class="btn btn-glass btn-lg" href="../README.md" target="_blank" rel="noopener">阅读项目说明</a>
+      </div>
+      <p class="cta-note"><svg class="icon"><use href="#i-shield"/></svg>不持续监控 · 截图不落盘 · 回复绝不代发</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="#top" aria-label="回到顶部">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M7 12a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5h-5l-4.5 4v-4.2A5 5 0 0 1 7 18z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 13h8M12 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <span class="brand-text"><b>言外</b><i>YANWAI · CONVERSATION DECODER</i></span>
+      </a>
+      <p>言外 · 读懂言外之意的对话解码器。不持续监控，不读心，只读语境。</p>
+      <div class="footer-badges"><span>Windows 10 / 11</span><span>Python 3.12</span><span>V1</span></div>
+    </div>
+    <nav class="footer-col" aria-label="产品">
+      <h4>产品</h4>
+      <a href="#features">能力</a>
+      <a href="#features">能力清单</a>
+      <a href="#architecture">解读流程</a>
+      <a href="#privacy">隐私边界</a>
+    </nav>
+    <nav class="footer-col" aria-label="项目">
+      <h4>项目</h4>
+      <a href="#start">快速开始</a>
+      <a href="#faq">常见问题</a>
+      <a href="../README.md" target="_blank" rel="noopener">README.md</a>
+      <a href="../PROJECT_SPEC.md" target="_blank" rel="noopener">PROJECT_SPEC.md</a>
+    </nav>
+    <div class="footer-col">
+      <h4>技术栈</h4>
+      <span>PaddleOCR · PP-OCRv6</span>
+      <span>PySide6 · Qt Signal/Slot</span>
+      <span>Pydantic v2 · OpenAI SDK</span>
+      <span>mss · keyring · pytest</span>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <p>© 2026 言外 · 本页为项目介绍页，与 Windows 桌面程序一同维护。</p>
+    <p class="footer-tagline"><i class="pulse-dot tiny"></i>截图不落盘 · 回复不代发</p>
+  </div>
+</footer>
+
+<button class="to-top" id="toTop" type="button" aria-label="回到顶部">
+  <svg class="icon"><use href="#i-arrow"/></svg>
+</button>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="assets/main.js" defer></script>
+</body>
+</html>

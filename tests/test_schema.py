@@ -109,3 +109,24 @@ def test_screen_region():
 def test_suggested_reply():
     reply = SuggestedReply(style="自然", text="好的")
     assert reply.style == "自然"
+    assert reply.why == ""
+
+
+def test_v2_optional_fields_default_and_coerce():
+    data = dict(VALID)
+    data["thinking"] = "步骤一"
+    data["evidence"] = "原文里的逗号"
+    data["alternatives"] = "也可能只是随口一问"
+    result = AnalysisResult.model_validate(data)
+    assert result.thinking == ["步骤一"]
+    assert result.evidence == ["原文里的逗号"]
+    assert result.alternatives == ["也可能只是随口一问"]
+    assert result.vision_used is False
+
+
+def test_v2_optional_fields_default_empty():
+    result = AnalysisResult.model_validate(VALID)
+    assert result.thinking == []
+    assert result.evidence == []
+    assert result.alternatives == []
+    assert result.vision_used is False

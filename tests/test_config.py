@@ -14,7 +14,7 @@ def test_defaults():
     assert s.max_context_messages == 20
     assert s.max_context_chars == 8000
     assert s.llm_temperature == 0.3
-    assert s.llm_timeout == 30.0
+    assert s.llm_timeout == 90.0
     assert s.always_on_top is True
     assert s.auto_start_monitoring is False
     assert s.is_llm_configured is False

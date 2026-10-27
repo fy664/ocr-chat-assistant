@@ -102,6 +102,19 @@ class Settings(BaseModel):
     # Context
     speaker_heuristic: bool = True
 
+    # Analysis / multimodal (v2 on-demand decoder)
+    thinking_enabled: bool = False      # 深度思考默认关闭：快速解读优先
+    thinking_auto_collapse: bool = True
+    vision_enabled: bool = True         # 按需解读默认附带画面（表情包/贴纸）
+    vision_max_side: int = 1024
+    vision_quality: int = 80
+    fast_frame_gate: bool = True
+    long_text_max_chars: int = 30000
+    max_screenshots: int = 4
+    llm_max_tokens: int = 2600
+    vision_defaulted_v2: bool = False  # 一次性迁移标记：v2 首次启动启用按需画面理解
+    fast_defaulted_v2: bool = False    # 一次性迁移标记：v2 首次启动默认快速解读
+
     # UI
     always_on_top: bool = True
     auto_start_monitoring: bool = False
@@ -121,6 +134,11 @@ class Settings(BaseModel):
         self.min_ocr_chars = max(1, min(20, self.min_ocr_chars))
         self.llm_temperature = max(0.0, min(2.0, self.llm_temperature))
         self.llm_timeout = max(5.0, min(300.0, self.llm_timeout))
+        self.vision_max_side = max(384, min(1600, int(self.vision_max_side)))
+        self.vision_quality = max(50, min(95, int(self.vision_quality)))
+        self.long_text_max_chars = max(2000, min(100000, int(self.long_text_max_chars)))
+        self.max_screenshots = max(1, min(6, int(self.max_screenshots)))
+        self.llm_max_tokens = max(512, min(16000, int(self.llm_max_tokens)))
         return self
 
     @property

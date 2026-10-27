@@ -1,3 +1,5 @@
+> **历史文档说明（2026-10）：** 本文件描述的是 V1「实时监控」版本。当前产品「言外」已改为按需解读（粘贴长文 / 读取一次画面），新增长文、表情包视觉、快速/深度模式；请以 README.md 与 app/analysis/decoder.py 为准。
+
 # OCR Chat Assistant
 ## Windows 实时聊天语义分析助手 V1.0
 ### Claude Code 一次性实施规格 / Product Specification / Engineering Contract
@@ -1487,7 +1489,7 @@ LLM_API_KEY=
 LLM_BASE_URL=
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=30
+LLM_TIMEOUT=90
 ```
 
 `.env.example`：
@@ -1498,7 +1500,7 @@ LLM_API_KEY=
 LLM_BASE_URL=
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=30
+LLM_TIMEOUT=90
 ```
 
 `.gitignore` 必须包含：
@@ -2213,7 +2215,7 @@ OCR queue: latest-only
 LLM：
 
 ```text
-timeout = 30s
+timeout = 90s
 ```
 
 可配置。

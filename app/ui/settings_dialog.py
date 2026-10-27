@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -25,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.llm.provider import LLMConfig, OpenAICompatibleClient
+from app.ui.widgets import BrandMark, set_tone
 
 logger = logging.getLogger("ocr_chat.ui.settings")
 
@@ -50,16 +53,36 @@ class SettingsDialog(QDialog):
         self._result: dict | None = None
 
         self.setWindowTitle("设置")
-        self.setMinimumWidth(440)
+        self.resize(560, 650)
+        self.setMinimumWidth(500)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(12)
+
+        # ---- header -----------------------------------------------------------
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        header.addWidget(BrandMark(32))
+        titles = QVBoxLayout()
+        titles.setSpacing(1)
+        title = QLabel("设置")
+        title.setObjectName("dialogTitle")
+        subtitle = QLabel("模型连接 · 按需解读 · 界面")
+        subtitle.setObjectName("dialogSubtitle")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        header.addLayout(titles)
+        header.addStretch(1)
+        root.addLayout(header)
+
         self._tabs = QTabWidget()
-        root.addWidget(self._tabs)
+        self._tabs.setDocumentMode(True)
+        root.addWidget(self._tabs, 1)
 
         # ---- LLM tab -------------------------------------------------------
         llm_tab = QWidget()
-        llm_form = QFormLayout(llm_tab)
-        llm_form.setContentsMargins(12, 12, 12, 12)
+        llm_form = self._make_form(llm_tab)
 
         self._provider_edit = QLineEdit(settings.llm_provider)
         self._provider_edit.setPlaceholderText("自定义 / 厂商名（仅作标记）")
@@ -82,35 +105,47 @@ class SettingsDialog(QDialog):
         self._temperature_spin.setRange(0.0, 2.0)
         self._temperature_spin.setSingleStep(0.1)
         self._temperature_spin.setValue(float(settings.llm_temperature))
+        self._tidy_spin(self._temperature_spin)
         llm_form.addRow("Temperature", self._temperature_spin)
 
         self._timeout_spin = QSpinBox()
         self._timeout_spin.setRange(5, 300)
         self._timeout_spin.setValue(int(settings.llm_timeout))
         self._timeout_spin.setSuffix(" 秒")
+        self._tidy_spin(self._timeout_spin)
         llm_form.addRow("Timeout", self._timeout_spin)
 
         test_row = QVBoxLayout()
+        test_row.setSpacing(5)
         self._test_button = QPushButton("测试连接")
+        self._test_button.setObjectName("testButton")
+        self._test_button.setMinimumHeight(32)
+        self._test_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._test_button.clicked.connect(self._on_test_connection)
         test_row.addWidget(self._test_button)
         self._test_result_label = QLabel("")
+        self._test_result_label.setObjectName("testResult")
         self._test_result_label.setWordWrap(True)
         test_row.addWidget(self._test_result_label)
         llm_form.addRow("", test_row)
+
+        key_hint = QLabel("API Key 仅保存在本机凭据管理器，不会写入配置文件或日志。")
+        key_hint.setObjectName("dialogHint")
+        key_hint.setWordWrap(True)
+        llm_form.addRow("", key_hint)
 
         self._tabs.addTab(llm_tab, "LLM")
 
         # ---- Realtime tab -----------------------------------------------------
         rt_tab = QWidget()
-        rt_form = QFormLayout(rt_tab)
-        rt_form.setContentsMargins(12, 12, 12, 12)
+        rt_form = self._make_form(rt_tab)
 
         self._interval_spin = QSpinBox()
         self._interval_spin.setRange(500, 3000)
         self._interval_spin.setSingleStep(100)
         self._interval_spin.setValue(int(settings.capture_interval_ms))
         self._interval_spin.setSuffix(" ms")
+        self._tidy_spin(self._interval_spin)
         rt_form.addRow("OCR 采样间隔", self._interval_spin)
 
         self._debounce_spin = QSpinBox()
@@ -118,33 +153,197 @@ class SettingsDialog(QDialog):
         self._debounce_spin.setSingleStep(100)
         self._debounce_spin.setValue(int(settings.debounce_ms))
         self._debounce_spin.setSuffix(" ms")
+        self._tidy_spin(self._debounce_spin)
         rt_form.addRow("防抖等待", self._debounce_spin)
 
         self._max_messages_spin = QSpinBox()
         self._max_messages_spin.setRange(5, 100)
         self._max_messages_spin.setValue(int(settings.max_context_messages))
+        self._tidy_spin(self._max_messages_spin)
         rt_form.addRow("最大上下文条数", self._max_messages_spin)
 
         self._max_chars_spin = QSpinBox()
         self._max_chars_spin.setRange(1000, 50000)
         self._max_chars_spin.setSingleStep(500)
         self._max_chars_spin.setValue(int(settings.max_context_chars))
+        self._tidy_spin(self._max_chars_spin)
         rt_form.addRow("最大上下文字符", self._max_chars_spin)
 
-        self._tabs.addTab(rt_tab, "实时")
+        interval_hint = QLabel("推荐组合：采样 2000ms + 防抖 700ms。采样越密，OCR 越忙但更实时。")
+        interval_hint.setObjectName("dialogHint")
+        interval_hint.setWordWrap(True)
+        rt_form.addRow("", interval_hint)
+
+
+        # ---- Analysis tab -----------------------------------------------------
+        an_tab = QWidget()
+        an_layout = QVBoxLayout(an_tab)
+        an_layout.setContentsMargins(14, 14, 14, 12)
+        an_layout.setSpacing(10)
+
+        vision_card = QFrame()
+        vision_card.setObjectName("infoCard")
+        vision_layout = QVBoxLayout(vision_card)
+        vision_layout.setContentsMargins(12, 10, 12, 10)
+        vision_layout.setSpacing(6)
+        vision_title = QLabel("多模态视觉")
+        vision_title.setObjectName("infoTitle")
+        vision_layout.addWidget(vision_title)
+        self._vision_check = QCheckBox("将框选区域的截图随请求发送给模型")
+        self._vision_check.setChecked(bool(settings.vision_enabled))
+        self._vision_check.toggled.connect(self._set_vision_controls_enabled)
+        vision_layout.addWidget(self._vision_check)
+        vision_warning = QLabel(
+            "开启后，截图不再只留在本机：会将当前框选区域压缩为 JPEG 后随请求发送给你配置的 LLM 服务商。"
+        )
+        vision_warning.setObjectName("dialogHint")
+        vision_warning.setWordWrap(True)
+        vision_layout.addWidget(vision_warning)
+
+        vision_row = QHBoxLayout()
+        vision_row.setSpacing(8)
+        max_side_label = QLabel("最大边")
+        max_side_label.setObjectName("dialogHint")
+        self._vision_max_spin = QSpinBox()
+        self._vision_max_spin.setRange(384, 1600)
+        self._vision_max_spin.setSingleStep(128)
+        self._vision_max_spin.setValue(int(settings.vision_max_side))
+        self._vision_max_spin.setSuffix(" px")
+        self._tidy_spin(self._vision_max_spin)
+        quality_label = QLabel("JPEG 画质")
+        quality_label.setObjectName("dialogHint")
+        self._vision_quality_spin = QSpinBox()
+        self._vision_quality_spin.setRange(50, 95)
+        self._vision_quality_spin.setSingleStep(5)
+        self._vision_quality_spin.setValue(int(settings.vision_quality))
+        self._vision_quality_spin.setSuffix(" %")
+        self._tidy_spin(self._vision_quality_spin)
+        vision_row.addWidget(max_side_label)
+        vision_row.addWidget(self._vision_max_spin)
+        vision_row.addWidget(quality_label)
+        vision_row.addWidget(self._vision_quality_spin)
+        vision_row.addStretch(1)
+        vision_layout.addLayout(vision_row)
+        self._set_vision_controls_enabled(bool(settings.vision_enabled))
+        an_layout.addWidget(vision_card)
+
+        thinking_card = QFrame()
+        thinking_card.setObjectName("infoCard")
+        thinking_layout = QVBoxLayout(thinking_card)
+        thinking_layout.setContentsMargins(12, 10, 12, 10)
+        thinking_layout.setSpacing(6)
+        thinking_title = QLabel("思考路径")
+        thinking_title.setObjectName("infoTitle")
+        thinking_layout.addWidget(thinking_title)
+        self._thinking_check = QCheckBox("深度思考（推理模型实时返回，通常较慢）")
+        self._thinking_check.setChecked(bool(settings.thinking_enabled))
+        thinking_layout.addWidget(self._thinking_check)
+        self._thinking_collapse_check = QCheckBox("解读完成后自动折叠，点击标题可展开")
+        self._thinking_collapse_check.setChecked(bool(settings.thinking_auto_collapse))
+        thinking_layout.addWidget(self._thinking_collapse_check)
+        an_layout.addWidget(thinking_card)
+
+        perf_card = QFrame()
+        perf_card.setObjectName("infoCard")
+        perf_layout = QVBoxLayout(perf_card)
+        perf_layout.setContentsMargins(12, 10, 12, 10)
+        perf_layout.setSpacing(6)
+        perf_title = QLabel("长文与输出")
+        perf_title.setObjectName("infoTitle")
+        perf_layout.addWidget(perf_title)
+        self._gate_check = QCheckBox("跳过完全相同的帧（旧版实时引擎）")
+        self._gate_check.setChecked(bool(settings.fast_frame_gate))
+        self._gate_check.setVisible(False)
+
+        long_row = QHBoxLayout()
+        long_row.setSpacing(8)
+        long_label = QLabel("长文上限")
+        long_label.setObjectName("dialogHint")
+        self._long_text_spin = QSpinBox()
+        self._long_text_spin.setRange(5000, 100000)
+        self._long_text_spin.setSingleStep(5000)
+        self._long_text_spin.setValue(int(settings.long_text_max_chars))
+        self._long_text_spin.setSuffix(" 字")
+        self._tidy_spin(self._long_text_spin)
+        shots_label = QLabel("画面张数")
+        shots_label.setObjectName("dialogHint")
+        self._max_shots_spin = QSpinBox()
+        self._max_shots_spin.setRange(1, 6)
+        self._max_shots_spin.setValue(int(settings.max_screenshots))
+        self._max_shots_spin.setSuffix(" 张")
+        self._tidy_spin(self._max_shots_spin)
+        tokens_label = QLabel("输出上限")
+        tokens_label.setObjectName("dialogHint")
+        self._max_tokens_spin = QSpinBox()
+        self._max_tokens_spin.setRange(512, 16000)
+        self._max_tokens_spin.setSingleStep(256)
+        self._max_tokens_spin.setValue(int(settings.llm_max_tokens))
+        self._max_tokens_spin.setSuffix(" tok")
+        self._tidy_spin(self._max_tokens_spin)
+        long_row.addWidget(long_label)
+        long_row.addWidget(self._long_text_spin)
+        long_row.addWidget(shots_label)
+        long_row.addWidget(self._max_shots_spin)
+        long_row.addWidget(tokens_label)
+        long_row.addWidget(self._max_tokens_spin)
+        long_row.addStretch(1)
+        perf_layout.addLayout(long_row)
+        perf_hint = QLabel(
+            "深度思考默认关闭；关闭时仍在结果里给出简短思考摘要，速度明显更快。"
+            "长文超出上限会保留最近部分，画面张数越多请求越大。"
+        )
+        perf_hint.setObjectName("dialogHint")
+        perf_hint.setWordWrap(True)
+        perf_layout.addWidget(perf_hint)
+        an_layout.addWidget(perf_card)
+        an_layout.addStretch(1)
+
+        self._tabs.addTab(an_tab, "解读")
 
         # ---- UI tab -----------------------------------------------------------
         ui_tab = QWidget()
-        ui_form = QFormLayout(ui_tab)
-        ui_form.setContentsMargins(12, 12, 12, 12)
+        ui_layout = QVBoxLayout(ui_tab)
+        ui_layout.setContentsMargins(14, 14, 14, 12)
+        ui_layout.setSpacing(10)
+
+        behavior = QFrame()
+        behavior.setObjectName("infoCard")
+        behavior_layout = QVBoxLayout(behavior)
+        behavior_layout.setContentsMargins(12, 10, 12, 10)
+        behavior_layout.setSpacing(8)
+        behavior_title = QLabel("窗口行为")
+        behavior_title.setObjectName("infoTitle")
+        behavior_layout.addWidget(behavior_title)
 
         self._always_on_top_check = QCheckBox("窗口始终置顶")
         self._always_on_top_check.setChecked(bool(settings.always_on_top))
-        ui_form.addRow("", self._always_on_top_check)
+        behavior_layout.addWidget(self._always_on_top_check)
 
         self._auto_start_check = QCheckBox("启动时自动开始监控（需要已保存的区域）")
         self._auto_start_check.setChecked(bool(settings.auto_start_monitoring))
-        ui_form.addRow("", self._auto_start_check)
+        self._auto_start_check.setVisible(False)
+        ui_layout.addWidget(behavior)
+
+        ui_layout.addWidget(
+            self._info_card(
+                "使用要点",
+                [
+                    "Ctrl + Shift + S   重新框选聊天区域 · Enter 确认 · Esc 取消",
+                    "截图只存在内存，回复建议只复制到剪贴板，程序不会自动发送。",
+                    "API Key 保存于 Windows 凭据管理器，不写入配置文件。",
+                ],
+            )
+        )
+        ui_layout.addWidget(
+            self._info_card(
+                "关于",
+                [
+                    "言外 V2 · Windows 10 / 11 · 按需解读",
+                    "PySide6 6.11 · PaddleOCR 3.7 · Pydantic v2",
+                ],
+            )
+        )
+        ui_layout.addStretch(1)
 
         self._tabs.addTab(ui_tab, "界面")
 
@@ -152,9 +351,65 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        save_button.setText("保存")
+        save_button.setObjectName("primaryButton")
+        cancel_button.setText("取消")
+        cancel_button.setObjectName("quietButton")
+        for button in (save_button, cancel_button):
+            button.setMinimumHeight(32)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+    # ---- helpers ---------------------------------------------------------------
+
+    @staticmethod
+    def _make_form(container: QWidget) -> QFormLayout:
+        form = QFormLayout(container)
+        form.setContentsMargins(14, 14, 14, 12)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(11)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+        return form
+
+    @staticmethod
+    def _info_card(title: str, lines: list[str]) -> QFrame:
+        card = QFrame()
+        card.setObjectName("infoCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(5)
+        title_label = QLabel(title)
+        title_label.setObjectName("infoTitle")
+        layout.addWidget(title_label)
+        for line in lines:
+            label = QLabel(line)
+            label.setObjectName("infoLine")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        return card
+
+    @staticmethod
+    def _tidy_spin(spin: QAbstractSpinBox) -> QAbstractSpinBox:
+        # Fusion draws the arrow sub-controls as light blocks on a dark field;
+        # typing and the wheel remain fully functional without them.
+        spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spin.setToolTip("可直接输入，或用鼠标滚轮 / ↑ ↓ 调整")
+        return spin
+
+    def _set_vision_controls_enabled(self, enabled: bool) -> None:
+        self._vision_max_spin.setEnabled(bool(enabled))
+        self._vision_quality_spin.setEnabled(bool(enabled))
+
+    def _set_test_message(self, text: str, tone: str = "gray") -> None:
+        self._test_result_label.setText(text)
+        set_tone(self._test_result_label, tone)
 
     # ---- handlers --------------------------------------------------------------
 
@@ -171,23 +426,23 @@ class SettingsDialog(QDialog):
     def _on_test_connection(self) -> None:
         config = self._current_llm_config()
         if not config.api_key:
-            self._test_result_label.setText("请先填写 API Key")
+            self._set_test_message("请先填写 API Key", "error")
             return
         if not config.base_url:
-            self._test_result_label.setText("请先填写 Base URL")
+            self._set_test_message("请先填写 Base URL", "error")
             return
         if not config.model:
-            self._test_result_label.setText("请先填写 Model")
+            self._set_test_message("请先填写 Model", "error")
             return
         self._test_button.setEnabled(False)
-        self._test_result_label.setText("测试中…")
+        self._set_test_message("正在测试连接…", "gray")
         self._test_thread = _TestConnectionThread(config, self)
         self._test_thread.finished_test.connect(self._on_test_finished)
         self._test_thread.start()
 
     def _on_test_finished(self, ok: bool, message: str) -> None:
         self._test_button.setEnabled(True)
-        self._test_result_label.setText(message)
+        self._set_test_message(message, "ok" if ok else "error")
 
     def _on_save(self) -> None:
         s = self._settings
@@ -203,6 +458,15 @@ class SettingsDialog(QDialog):
         s.debounce_ms = int(self._debounce_spin.value())
         s.max_context_messages = int(self._max_messages_spin.value())
         s.max_context_chars = int(self._max_chars_spin.value())
+        s.thinking_enabled = self._thinking_check.isChecked()
+        s.thinking_auto_collapse = self._thinking_collapse_check.isChecked()
+        s.vision_enabled = self._vision_check.isChecked()
+        s.vision_max_side = int(self._vision_max_spin.value())
+        s.vision_quality = int(self._vision_quality_spin.value())
+        s.fast_frame_gate = self._gate_check.isChecked()
+        s.long_text_max_chars = int(self._long_text_spin.value())
+        s.max_screenshots = int(self._max_shots_spin.value())
+        s.llm_max_tokens = int(self._max_tokens_spin.value())
         s.always_on_top = self._always_on_top_check.isChecked()
         s.auto_start_monitoring = self._auto_start_check.isChecked()
         try:

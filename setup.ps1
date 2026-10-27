@@ -1,8 +1,8 @@
-# OCR Chat Assistant - one-click setup (Windows)
+# 言外 Yanwai - one-click setup (Windows)
 # Creates .venv and installs all dependencies. Run:  .\setup.ps1
 $ErrorActionPreference = "Stop"
 
-Write-Host "== OCR Chat Assistant Setup ==" -ForegroundColor Cyan
+Write-Host "== 言外 Yanwai Setup ==" -ForegroundColor Cyan
 
 # 1. Locate Python (prefer the py launcher with 3.12 / 3.11 / 3.13, fall back to python)
 $pyCmd = $null

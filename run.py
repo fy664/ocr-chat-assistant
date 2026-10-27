@@ -1,4 +1,4 @@
-"""OCR Chat Assistant - Windows V1 entry point.
+"""言外 Yanwai - Windows on-demand conversation decoder entry point.
 
 Usage:
     python run.py               # normal start

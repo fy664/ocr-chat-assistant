@@ -1,11 +1,13 @@
 """LLM provider abstraction.
 
-Business code only knows `LLMClient` - never a vendor-specific class.
-Switching providers is a config change (api_key/base_url/model), not a
-code change.
+Business code only knows a tiny duck-typed client: ``analyze`` (and optionally
+``analyze_stream`` for providers that expose a native reasoning channel).
+Switching providers is a config change (api_key/base_url/model), not a code
+change.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -38,6 +40,7 @@ class LLMConfig:
     model: str
     temperature: float = 0.3
     timeout: float = 30.0
+    max_tokens: int | None = None
 
 
 @dataclass
@@ -49,7 +52,7 @@ class ConnectionTestResult:
 
 
 class LLMClient(Protocol):
-    def analyze(self, system_prompt: str, context: str) -> AnalysisResult: ...
+    def analyze(self, system_prompt: str, context: str, images=None) -> AnalysisResult: ...
 
     def test_connection(self) -> ConnectionTestResult: ...
 
@@ -67,6 +70,8 @@ def _friendly_error(exc: Exception) -> str:
             return "模型不存在或 Base URL 错误（HTTP 404）"
         if isinstance(exc, openai.RateLimitError):
             return "请求频率过高（HTTP 429）"
+        if isinstance(exc, openai.BadRequestError):
+            return "模型不接受请求参数（HTTP 400，可能不支持该图片或字段）"
         if isinstance(exc, openai.InternalServerError):
             return "服务暂时不可用（HTTP 5xx）"
         if isinstance(exc, openai.APITimeoutError):
@@ -82,6 +87,66 @@ def _friendly_error(exc: Exception) -> str:
     return f"LLM 请求失败（{type(exc).__name__}）"
 
 
+def _reasoning_delta(delta) -> str:
+    """Best-effort extraction of provider-specific reasoning deltas."""
+    for attribute in ("reasoning_content", "reasoning"):
+        value = getattr(delta, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    extra = getattr(delta, "model_extra", None)
+    if isinstance(extra, dict):
+        for key in ("reasoning_content", "reasoning"):
+            value = extra.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return ""
+
+
+def _reasoning_steps(text: str, limit: int = 12) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    parts = [part.strip() for part in text.replace("\r", "\n").split("\n") if part.strip()]
+    if len(parts) == 1:
+        # Fall back to sentence-ish chunks for providers that stream one long line.
+        parts = [chunk.strip() for chunk in text.replace("。", "。\n").split("\n") if chunk.strip()]
+    return [part[:240] for part in parts[:limit]]
+
+
+def analyze_with_client(
+    client,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    images: list[str] | None = None,
+    on_reasoning=None,
+    on_status=None,
+) -> AnalysisResult:
+    """Call the richest supported client API without breaking older mocks.
+
+    A client may implement only ``analyze(system, user)``. Signature inspection
+    keeps that path working while letting our clients receive images/callbacks.
+    """
+    stream = getattr(client, "analyze_stream", None)
+    if on_reasoning is not None and callable(stream):
+        kwargs = {}
+        params = inspect.signature(stream).parameters
+        if "images" in params:
+            kwargs["images"] = images
+        if "on_reasoning" in params:
+            kwargs["on_reasoning"] = on_reasoning
+        if "on_status" in params:
+            kwargs["on_status"] = on_status
+        return stream(system_prompt, user_prompt, **kwargs)
+
+    analyze = client.analyze
+    params = inspect.signature(analyze).parameters
+    kwargs = {}
+    if "images" in params and images:
+        kwargs["images"] = images
+    return analyze(system_prompt, user_prompt, **kwargs)
+
+
 class OpenAICompatibleClient:
     """Unified OpenAI-compatible client (works with any compliant provider)."""
 
@@ -91,17 +156,115 @@ class OpenAICompatibleClient:
 
     # ---- LLMClient interface ----------------------------------------------
 
-    def analyze(self, system_prompt: str, context: str) -> AnalysisResult:
-        raw = self._chat(system_prompt, context)
+    def analyze(self, system_prompt: str, context: str, images=None) -> AnalysisResult:
+        raw = self._chat(system_prompt, context, images=images)
         try:
             return parse_analysis(raw)
         except LLMParseError as exc:
             logger.warning("first JSON parse failed, attempting one repair retry: %s", exc)
-            raw2 = self._chat(REPAIR_SYSTEM_PROMPT, build_repair_user_prompt(raw, str(exc)))
+            raw2 = self._chat(
+                REPAIR_SYSTEM_PROMPT,
+                build_repair_user_prompt(raw, str(exc)),
+                images=None,
+            )
             try:
                 return parse_analysis(raw2)
             except LLMParseError as exc2:
                 raise LLMResponseError("AI 返回格式异常，请重新分析。") from exc2
+
+    def analyze_stream(
+        self,
+        system_prompt: str,
+        context: str,
+        images=None,
+        *,
+        on_reasoning=None,
+        on_status=None,
+    ) -> AnalysisResult:
+        """Stream the response, forwarding native reasoning content.
+
+        The final JSON is collected and parsed exactly like ``analyze``. If the
+        provider does not expose reasoning, callbacks simply never fire.
+        """
+        if on_status:
+            on_status("requesting")
+        reasoning_parts: list[str] = []
+        content_parts: list[str] = []
+        first_token = False
+
+        try:
+            client = self._make_client()
+            request = {
+                "model": self._config.model,
+                "messages": self._build_messages(system_prompt, context, images),
+                "temperature": self._config.temperature,
+                "stream": True,
+            }
+            if self._config.max_tokens:
+                request["max_tokens"] = int(self._config.max_tokens)
+            stream = client.chat.completions.create(**request)
+            for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
+                reasoning = _reasoning_delta(delta)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+                    if not first_token:
+                        first_token = True
+                        if on_status:
+                            on_status("first_token")
+                    if on_reasoning:
+                        on_reasoning(reasoning)
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
+                    if not first_token:
+                        first_token = True
+                        if on_status:
+                            on_status("first_token")
+                    content_parts.append(content)
+        except LLMError:
+            raise
+        except Exception as exc:
+            # Some OpenAI-compatible gateways do not implement streaming or
+            # image content. If nothing was emitted yet, retry non-streaming
+            # once so a text-only analysis still succeeds.
+            if not first_token and not content_parts and not reasoning_parts:
+                if on_status:
+                    on_status("fallback")
+                logger.warning("streaming unavailable, falling back to non-stream: %s", exc)
+                return self.analyze(system_prompt, context, images=images)
+            raise LLMError(_friendly_error(exc)) from exc
+
+        raw = "".join(content_parts)
+        try:
+            if not raw.strip():
+                raise LLMResponseError("AI 返回内容为空")
+            result = parse_analysis(raw)
+        except LLMParseError as exc:
+            logger.warning("streamed JSON parse failed, attempting one repair retry: %s", exc)
+            try:
+                raw2 = self._chat(
+                    REPAIR_SYSTEM_PROMPT,
+                    build_repair_user_prompt(raw, str(exc)),
+                    images=None,
+                )
+                result = parse_analysis(raw2)
+            except LLMParseError as exc2:
+                raise LLMResponseError("AI 返回格式异常，请重新分析。") from exc2
+        except LLMResponseError:
+            raise
+
+        if reasoning_parts and not result.thinking:
+            result.thinking = _reasoning_steps("".join(reasoning_parts))
+        if images:
+            result.vision_used = True
+        if on_status:
+            on_status("parsing")
+        return result
 
     def test_connection(self) -> ConnectionTestResult:
         start = time.monotonic()
@@ -138,17 +301,33 @@ class OpenAICompatibleClient:
             max_retries=self._max_retries,
         )
 
-    def _chat(self, system_prompt: str, user_prompt: str) -> str:
+    def _build_messages(self, system_prompt: str, user_prompt: str, images=None):
+        if not images:
+            user_content = user_prompt
+        else:
+            user_content = [{"type": "text", "text": user_prompt}]
+            for data_url in images:
+                if not data_url:
+                    continue
+                user_content.append(
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                )
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+    def _chat(self, system_prompt: str, user_prompt: str, images=None) -> str:
         try:
             client = self._make_client()
-            response = client.chat.completions.create(
-                model=self._config.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=self._config.temperature,
-            )
+            request = {
+                "model": self._config.model,
+                "messages": self._build_messages(system_prompt, user_prompt, images),
+                "temperature": self._config.temperature,
+            }
+            if self._config.max_tokens:
+                request["max_tokens"] = int(self._config.max_tokens)
+            response = client.chat.completions.create(**request)
         except LLMError:
             raise
         except Exception as exc:
@@ -162,10 +341,13 @@ class OpenAICompatibleClient:
         return content
 
 
-def create_llm_client(settings) -> LLMClient:
+def create_llm_client(settings, max_tokens: int | None = None) -> LLMClient:
     """Build the configured client. Raises LLMNotConfiguredError without a key."""
     if not settings.is_llm_configured:
         raise LLMNotConfiguredError("请先配置 LLM API Key。")
+    token_limit = max_tokens
+    if token_limit is None:
+        token_limit = getattr(settings, "llm_max_tokens", None)
     config = LLMConfig(
         provider_name=settings.llm_provider or "custom",
         api_key=settings.llm_api_key,
@@ -173,5 +355,6 @@ def create_llm_client(settings) -> LLMClient:
         model=settings.llm_model,
         temperature=settings.llm_temperature,
         timeout=settings.llm_timeout,
+        max_tokens=token_limit,
     )
     return OpenAICompatibleClient(config, max_retries=1)

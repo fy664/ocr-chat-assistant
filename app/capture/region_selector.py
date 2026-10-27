@@ -10,8 +10,16 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QPoint, QRect, QObject, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen, QScreen
+from PySide6.QtCore import QPoint, QRect, QRectF, QObject, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QGuiApplication,
+    QPainter,
+    QPen,
+    QScreen,
+)
 from PySide6.QtWidgets import QApplication, QWidget
 
 from app.models.schemas import ScreenRegion
@@ -20,9 +28,10 @@ logger = logging.getLogger("ocr_chat.region_selector")
 
 MIN_SELECT_SIZE = 5
 
-MASK_COLOR = QColor(0, 0, 0, 100)
-BORDER_COLOR = QColor(76, 141, 255)
-TEXT_COLOR = QColor(255, 255, 255)
+MASK_COLOR = QColor(3, 5, 10, 172)
+BORDER_COLOR = QColor("#67e8f9")
+TEXT_COLOR = QColor("#eef3ff")
+PILL_BG = QColor(8, 12, 20, 228)
 
 
 class OverlayWindow(QWidget):
@@ -49,6 +58,7 @@ class OverlayWindow(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), MASK_COLOR)
 
         rect = self._selection_rect()
@@ -56,23 +66,52 @@ class OverlayWindow(QWidget):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
             painter.fillRect(rect, Qt.GlobalColor.transparent)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            painter.setPen(QPen(BORDER_COLOR, 2))
-            painter.drawRect(rect)
-            painter.setPen(TEXT_COLOR)
-            painter.setFont(QFont("Microsoft YaHei UI", 10))
-            size_text = f"{rect.width()} × {rect.height()}"
-            label_x = min(rect.right() + 8, self.width() - 120)
-            label_y = max(rect.top() - 6, 18)
-            painter.drawText(QPoint(label_x, label_y), size_text)
 
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(103, 232, 249, 55), 6))
+            painter.drawRect(rect.adjusted(-3, -3, 3, 3))
+            painter.setPen(QPen(BORDER_COLOR, 1.4))
+            painter.drawRect(rect)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(BORDER_COLOR)
+            for corner in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()):
+                painter.drawRoundedRect(
+                    QRectF(corner.x() - 3, corner.y() - 3, 6, 6), 1.5, 1.5
+                )
+
+            font = QFont("Microsoft YaHei UI")
+            font.setPixelSize(10)
+            font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(font)
+            metrics = QFontMetrics(font)
+            size_text = f"{rect.width()} × {rect.height()}"
+            pill_w = metrics.horizontalAdvance(size_text) + 18
+            pill_h = 22
+            pill_x = max(12, min(rect.right() - pill_w, self.width() - pill_w - 12))
+            pill_y = rect.top() + 8
+            if pill_y + pill_h > self.height() - 12:
+                pill_y = max(12, rect.bottom() - pill_h - 8)
+            pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
+            painter.setBrush(PILL_BG)
+            painter.setPen(QPen(QColor(103, 232, 249, 70), 1))
+            painter.drawRoundedRect(pill_rect, 7, 7)
+            painter.setPen(TEXT_COLOR)
+            painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, size_text)
+
+        hint_font = QFont("Microsoft YaHei UI")
+        hint_font.setPixelSize(11)
+        painter.setFont(hint_font)
+        metrics = QFontMetrics(hint_font)
+        hint = "拖动框选聊天区域   ·   Enter 确认   ·   Esc 取消"
+        hint = metrics.elidedText(hint, Qt.TextElideMode.ElideRight, max(160, self.width() - 90))
+        hint_w = metrics.horizontalAdvance(hint) + 36
+        hint_rect = QRectF((self.width() - hint_w) / 2, 26, hint_w, 36)
+        painter.setBrush(PILL_BG)
+        painter.setPen(QPen(QColor(255, 255, 255, 34), 1))
+        painter.drawRoundedRect(hint_rect, 12, 12)
         painter.setPen(TEXT_COLOR)
-        painter.setFont(QFont("Microsoft YaHei UI", 11))
-        hint = "拖动框选聊天区域 — Enter 确认 — Esc 取消"
-        painter.drawText(
-            self.rect().adjusted(0, 24, 0, -24),
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
-            hint,
-        )
+        painter.drawText(hint_rect, Qt.AlignmentFlag.AlignCenter, hint)
         painter.end()
 
     def _selection_rect(self) -> QRect | None:

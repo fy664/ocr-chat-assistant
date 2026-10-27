@@ -1,4 +1,4 @@
-# OCR Chat Assistant - one-click run (Windows)
+# 言外 Yanwai - one-click run (Windows)
 # Uses the project .venv and starts the app. Run:  .\run.ps1  (extra args are passed to run.py)
 $ErrorActionPreference = "Stop"
 

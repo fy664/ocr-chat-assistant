@@ -13,6 +13,8 @@ import time
 
 from PySide6.QtCore import QThread, Signal
 
+from app.llm.provider import analyze_with_client
+from app.llm.vision import encode_image_data_url
 from app.models.schemas import OCRResult
 
 logger = logging.getLogger("ocr_chat.workers")
@@ -77,16 +79,35 @@ class LLMWorkerThread(QThread):
     llm_completed = Signal(int, object)  # generation, AnalysisResult
     llm_failed = Signal(int, str)        # generation, friendly message
     llm_latency = Signal(int, float)     # generation, seconds
+    llm_reasoning = Signal(int, str)     # generation, reasoning delta
+    llm_status = Signal(int, str)        # generation, phase ("requesting"/"first_token"/...)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._lock = threading.Lock()
-        self._pending = None  # (generation, system_prompt, user_prompt, client)
+        self._pending = None  # (generation, system_prompt, user_prompt, client, images, vision_opts, thinking)
         self._stopped = threading.Event()
 
-    def submit(self, generation: int, system_prompt: str, user_prompt: str, client) -> None:
+    def submit(
+        self,
+        generation: int,
+        system_prompt: str,
+        user_prompt: str,
+        client,
+        images=(),
+        vision_options=(1024, 80),
+        thinking_enabled: bool = True,
+    ) -> None:
         with self._lock:
-            self._pending = (generation, system_prompt, user_prompt, client)
+            self._pending = (
+                generation,
+                system_prompt,
+                user_prompt,
+                client,
+                tuple(images or ()),
+                tuple(vision_options),
+                bool(thinking_enabled),
+            )
 
     def stop(self) -> None:
         self._stopped.set()
@@ -102,10 +123,42 @@ class LLMWorkerThread(QThread):
             if pending is None:
                 self.msleep(20)
                 continue
-            generation, system_prompt, user_prompt, client = pending
+            (
+                generation,
+                system_prompt,
+                user_prompt,
+                client,
+                images,
+                vision_options,
+                thinking_enabled,
+            ) = pending
             start = time.monotonic()
             try:
-                result = client.analyze(system_prompt, user_prompt)
+                image_urls: list[str] = []
+                if images:
+                    self.llm_status.emit(generation, "encoding")
+                    max_side, quality = vision_options
+                    for frame_image in images:
+                        url = encode_image_data_url(frame_image, max_side, quality)
+                        if url:
+                            image_urls.append(url)
+
+                def on_reasoning(delta: str) -> None:
+                    self.llm_reasoning.emit(generation, delta)
+
+                def on_status(status: str) -> None:
+                    self.llm_status.emit(generation, status)
+
+                result = analyze_with_client(
+                    client,
+                    system_prompt,
+                    user_prompt,
+                    images=image_urls or None,
+                    on_reasoning=on_reasoning if thinking_enabled else None,
+                    on_status=on_status,
+                )
+                if image_urls:
+                    result.vision_used = True
                 self.llm_completed.emit(generation, result)
                 self.llm_latency.emit(generation, time.monotonic() - start)
             except Exception as exc:

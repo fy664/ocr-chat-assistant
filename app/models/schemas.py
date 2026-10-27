@@ -99,10 +99,21 @@ class EmotionResult(BaseModel):
 class SuggestedReply(BaseModel):
     style: str
     text: str
+    # Optional rationale: why this phrasing fits the situation.
+    why: str = ""
 
 
 class AnalysisResult(BaseModel):
-    """Structured AI analysis. Core fields are fixed by the product spec."""
+    """Structured AI analysis. Core fields are fixed by the product spec.
+
+    The extra fields are optional and backward compatible:
+    - thinking:    concise, user-visible reasoning steps (fallback when the
+                   provider does not stream a native reasoning channel);
+    - evidence:    quoted text / visual cues that support the reading;
+    - alternatives: at least one competing interpretation, to discourage
+                   overconfident mind-reading;
+    - vision_used: whether a screenshot was part of this request.
+    """
 
     surface_meaning: str
     possible_intent: list[str]
@@ -112,12 +123,25 @@ class AnalysisResult(BaseModel):
     suggested_replies: list[SuggestedReply]
     uncertainty: str
 
-    @field_validator("possible_intent", "potential_needs", mode="before")
+    thinking: list[str] = []
+    evidence: list[str] = []
+    alternatives: list[str] = []
+    vision_used: bool = False
+
+    @field_validator(
+        "possible_intent",
+        "potential_needs",
+        "thinking",
+        "evidence",
+        "alternatives",
+        mode="before",
+    )
     @classmethod
     def _coerce_str_to_list(cls, v):
         """Real models occasionally return a bare string for a list field
         (e.g. qwen3.7-plus returns possible_intent as one string). Normalize
         it to a single-element list instead of failing the whole analysis."""
         if isinstance(v, str):
-            return [v]
+            v = v.strip()
+            return [v] if v else []
         return v
