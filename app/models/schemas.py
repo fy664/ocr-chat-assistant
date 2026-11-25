@@ -6,7 +6,7 @@ released as soon as OCR finishes.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,10 +41,26 @@ class ScreenshotFrame(BaseModel):
     image: Any
 
 
+class ChatAttribution(BaseModel):
+    side: Literal["left", "right"]
+    avatar: str = ""
+    nickname: str = ""
+    is_nickname: bool = False
+
+
+class ConversationInfo(BaseModel):
+    title: str = ""
+    kind: Literal["group", "private", "unknown"] = "unknown"
+    reason: str = ""
+    tentative: bool = False
+    sidebar_selected: str = ""
+
+
 class OCRLine(BaseModel):
     text: str
     confidence: float = 0.0
     box: list[list[float]] = Field(default_factory=list)
+    chat: ChatAttribution | None = None
 
     @property
     def x_center(self) -> float:
@@ -88,6 +104,8 @@ class OCRResult(BaseModel):
     boxes: list[list[list[float]]] = Field(default_factory=list)
     timestamp: float = 0.0
     error: str | None = None
+    conversation: ConversationInfo | None = None
+    chat_bounds: tuple[float, float, float, float] | None = None
 
 
 class EmotionResult(BaseModel):
@@ -101,6 +119,21 @@ class SuggestedReply(BaseModel):
     text: str
     # Optional rationale: why this phrasing fits the situation.
     why: str = ""
+
+
+class ConversationSummary(BaseModel):
+    overview: str = ""
+    timeline: list[str] = Field(default_factory=list)
+    decisions: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+
+
+class RecentChatEvent(BaseModel):
+    topic: str
+    description: str = ""
+    participants: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    needs_reply: bool | None = None
 
 
 class AnalysisResult(BaseModel):
@@ -127,6 +160,9 @@ class AnalysisResult(BaseModel):
     evidence: list[str] = []
     alternatives: list[str] = []
     vision_used: bool = False
+    conversation_summary: ConversationSummary | None = None
+    recent_event: RecentChatEvent | None = None
+    event_sources: list[str] = Field(default_factory=list)
 
     @field_validator(
         "possible_intent",

@@ -9,7 +9,9 @@ import argparse
 import logging
 import sys
 
-logger = logging.getLogger("yanwai.main")
+from app import __version__
+
+logger = logging.getLogger("ocr_chat.main")
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -33,27 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     from app.utils.logger import setup_logging
 
     settings = Settings.load()
-    migrated = False
-    if not settings.vision_defaulted_v2:
-        # v2 言外的主场景就是看懂表情包/贴纸/画面。旧配置里默认关闭的
-        # vision 在这里一次性迁移为开启；用户之后仍可在设置里关闭。
-        settings.vision_enabled = True
-        settings.vision_defaulted_v2 = True
-        migrated = True
-    if not settings.fast_defaulted_v2:
-        # 旧配置的 thinking=True 是 V1 的默认值，不是用户主动选择。
-        # v2 默认快速解读，避免一上手就等 30–60 秒。
-        settings.thinking_enabled = False
-        settings.fast_defaulted_v2 = True
-        migrated = True
-    if migrated:
-        try:
-            settings.save()
-        except Exception:
-            logger.debug("could not persist v2 settings migration", exc_info=True)
-
     setup_logging(debug=args.debug, secrets=[settings.llm_api_key])
-    logger.info("application startup (yanwai 2.0, mock_llm=%s)", args.mock_llm)
+    logger.info("application startup (yanwai %s, mock_llm=%s)", __version__, args.mock_llm)
     logger.info(
         "llm configured=%s provider=%s model=%s",
         settings.is_llm_configured,

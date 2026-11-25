@@ -1,4 +1,4 @@
-> **历史文档说明（2026-10）：** 本文件描述的是 V1「实时监控」版本。当前产品「言外」已改为按需解读（粘贴长文 / 读取一次画面），新增长文、表情包视觉、快速/深度模式；请以 README.md 与 app/analysis/decoder.py 为准。
+> **历史规格**。本文描述 V1 实时监控方案。当前功能与结构见 [README](README.md) 和 [项目骨架](docs/ARCHITECTURE.md)。
 
 # OCR Chat Assistant
 ## Windows 实时聊天语义分析助手 V1.0

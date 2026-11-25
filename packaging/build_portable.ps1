@@ -5,9 +5,9 @@
 param(
     [string]$OutputRoot = (Join-Path $PSScriptRoot "..\_packaging\portable"),
     [string]$SitePackages = (Join-Path $PSScriptRoot "..\.venv\Lib\site-packages"),
-    [string]$PythonVersion = "3.12.0",
-    [string]$CacheDir = (Join-Path $PSScriptRoot "..\_packaging\cache"),
-    [switch]$SkipCopy
+    [string]$PythonExe = (Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"),
+    [string]$PythonVersion,
+    [string]$CacheDir = (Join-Path $PSScriptRoot "..\_packaging\cache")
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +15,29 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $CacheDir = [IO.Path]::GetFullPath($CacheDir)
 $SitePackages = [IO.Path]::GetFullPath($SitePackages)
+$PythonExe = [IO.Path]::GetFullPath($PythonExe)
+if (Test-Path -LiteralPath $OutputRoot) {
+    throw "输出路径已存在，请用 -OutputRoot 指定新目录：$OutputRoot"
+}
+if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+    throw "找不到虚拟环境的 Python：$PythonExe"
+}
+$environment = & $PythonExe -c "import platform,sys; print(platform.python_version(), platform.machine())"
+if ($LASTEXITCODE -ne 0 -or $environment -notmatch '^((3\.(11|12))\.\d+) (AMD64|x86_64)$') {
+    throw "打包需要 64 位 Python 3.11 或 3.12 的虚拟环境。"
+}
+$environmentVersion = $Matches[1]
+$environmentMajorMinor = $Matches[2]
+if (-not $PythonVersion) { $PythonVersion = $environmentVersion }
+if ($PythonVersion -notmatch ('^' + [regex]::Escape($environmentMajorMinor) + '\.\d+$')) {
+    throw "Python embeddable 的主、次版本必须与虚拟环境一致（$environmentMajorMinor）。"
+}
+
+$targetPrefix = $OutputRoot.TrimEnd([char]92, [char]47) + [IO.Path]::DirectorySeparatorChar
+if ($CacheDir.Equals($OutputRoot, [StringComparison]::OrdinalIgnoreCase) -or
+    $CacheDir.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "缓存目录必须位于构建输出目录之外。"
+}
 
 if (-not (Test-Path (Join-Path $SitePackages "PySide6"))) {
     throw "site-packages 不完整：$SitePackages（先运行 .\setup.ps1）"
@@ -25,11 +48,16 @@ $zipName = "python-$PythonVersion-embed-amd64.zip"
 $zipPath = Join-Path $CacheDir $zipName
 if (-not (Test-Path $zipPath)) {
     Write-Host "下载 Python $PythonVersion embeddable ..."
-    Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$PythonVersion/$zipName" -OutFile $zipPath -UseBasicParsing
+    $download = Join-Path $CacheDir ([guid]::NewGuid().ToString("N") + ".download")
+    try {
+        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$PythonVersion/$zipName" -OutFile $download -UseBasicParsing
+        Move-Item -LiteralPath $download -Destination $zipPath
+    } finally {
+        if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download }
+    }
 }
 
-if (Test-Path $OutputRoot) { Remove-Item -LiteralPath $OutputRoot -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+New-Item -ItemType Directory -Path $OutputRoot | Out-Null
 $RuntimeRoot = Join-Path $OutputRoot "runtime"
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 Write-Host "解压 Python embeddable ..."
@@ -53,32 +81,24 @@ $zipStd = "python" + (($PythonVersion -split '\.')[0..1] -join '') + ".zip"
 
 $runtimeSite = Join-Path $RuntimeRoot "Lib\site-packages"
 New-Item -ItemType Directory -Force -Path $runtimeSite | Out-Null
-if (-not $SkipCopy) {
-    Write-Host "复制运行依赖（约 1.4GB，首次较慢）..."
-    $excludeDirs = @("__pycache__", ".pytest_cache", "pip", "pytest", "_pytest", "pluggy", "iniconfig")
+function Copy-BuildTree($source, $destination, [string[]]$excludeDirs) {
     $copyArgs = @(
-        $SitePackages, $runtimeSite, "/E", "/MT:16", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:1", "/W:1"
-        "/XD"
+        $source, $destination, "/E", "/XJ", "/MT:16", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:1", "/W:1",
+        "/XF", "*.pyc", "*.pyo", "/XD", "__pycache__", ".pytest_cache"
     ) + $excludeDirs
     & robocopy @copyArgs | Out-Host
-    if ($LASTEXITCODE -ge 8) { throw "robocopy 复制依赖失败：$LASTEXITCODE" }
+    if ($LASTEXITCODE -ge 8) { throw "robocopy 复制失败：$LASTEXITCODE" }
 }
 
-# 复制应用源码与资源；不复制项目根目录的 .env / 配置 / 测试 / 文档 / .venv。
+Write-Host "复制运行依赖 ..."
+Copy-BuildTree $SitePackages $runtimeSite @("pip", "pytest", "_pytest", "pluggy", "iniconfig")
+
+# 只复制应用源码与资源，缓存从源头排除。
 Write-Host "复制应用源码 ..."
 foreach ($dir in @("app", "assets")) {
-    Copy-Item -LiteralPath (Join-Path $root $dir) -Destination $OutputRoot -Recurse -Force
+    Copy-BuildTree (Join-Path $root $dir) (Join-Path $OutputRoot $dir) @()
 }
-Copy-Item -LiteralPath (Join-Path $root "run.py") -Destination $OutputRoot -Force
-Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination $OutputRoot -Force
-# 安装包使用 runtime\pythonw.exe 直接注册协议，不复制源码版 web 启动器。
-
-# 清理 Python 缓存与安装期垃圾；不要清理 dist-info（importlib.metadata / entry points 需要它）。
-Write-Host "清理缓存 ..."
-Get-ChildItem -LiteralPath $OutputRoot -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-Get-ChildItem -LiteralPath $OutputRoot -Recurse -File -Include "*.pyc", "*.pyo" -ErrorAction SilentlyContinue |
-    Remove-Item -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $root "run.py") -Destination $OutputRoot
 
 # 便携启动入口（安装包会创建快捷方式，不依赖这个 .cmd）。
 @'
@@ -105,6 +125,6 @@ $py = Join-Path $RuntimeRoot "python.exe"
 Write-Host "验证打包 Python 导入 ..."
 Push-Location $OutputRoot
 try {
-    & $py -c "import sys; print(sys.version); import PySide6, cv2, numpy, openai; from app.ocr.engine import _patch_six_meta_path_importer; _patch_six_meta_path_importer(); import paddle, paddleocr; print('imports OK')"
+    & $py -c "import sys; print(sys.version); import PySide6, cv2, numpy, openai; from app.ocr.engine import _patch_six_meta_path_importer; _patch_six_meta_path_importer(); import paddle, paddleocr; from app.ui.decoder_window import DecoderWindow; from app.config.settings import Settings; print('imports OK')"
 } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { throw "打包运行时导入验证失败" }

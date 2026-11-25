@@ -3,7 +3,7 @@
 - ThinkingPanel : DeepSeek-style collapsible reasoning trail
 - StageStepper  : 5-stage realtime pipeline indicator
 - PipelineLog   : timestamped pipeline timeline
-- ImagePreview  : local-only screenshot preview (optionally sent to the model)
+- ImagePreview  : live collection view and single-frame preview
 """
 from __future__ import annotations
 
@@ -414,25 +414,30 @@ class PipelinePanel(QWidget):
 
 
 class ImagePreview(QWidget):
-    """Rounded local preview of the last captured frame."""
+    """Paint the current local frame at the display size."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
+        self._placeholder = ""
         self.setMinimumHeight(110)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_frame(self, image) -> None:
         if image is None:
-            self._pixmap = None
+            self.clear()
+            return
+        if isinstance(image, QImage):
+            self._pixmap = QPixmap.fromImage(image)
             self.update()
             return
         try:
             import numpy as np
 
-            array = np.ascontiguousarray(image)
+            array = np.asarray(image)
             if array.ndim != 3 or array.shape[2] < 3:
                 raise ValueError("unsupported frame")
+            array = np.ascontiguousarray(array[:, :, :3], dtype=np.uint8)
             height, width = array.shape[:2]
             qimage = QImage(
                 array.data,
@@ -444,6 +449,10 @@ class ImagePreview(QWidget):
             self._pixmap = QPixmap.fromImage(qimage)
         except Exception:
             self._pixmap = None
+        self.update()
+
+    def set_placeholder(self, text: str) -> None:
+        self._placeholder = text
         self.update()
 
     def clear(self) -> None:
@@ -462,16 +471,13 @@ class ImagePreview(QWidget):
 
         if self._pixmap is not None and not self._pixmap.isNull():
             inner = rect.adjusted(6, 6, -6, -6)
-            scaled = self._pixmap.scaled(
-                inner.size().toSize(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            x = inner.left() + (inner.width() - scaled.width()) / 2
-            y = inner.top() + (inner.height() - scaled.height()) / 2
+            size = self._pixmap.size().scaled(inner.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio)
+            target = QRectF(0, 0, size.width(), size.height())
+            target.moveCenter(inner.center())
             painter.save()
             painter.setClipPath(path)
-            painter.drawPixmap(int(x), int(y), scaled)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
             painter.restore()
         else:
             painter.setPen(QColor("#5f6d83"))
@@ -481,6 +487,6 @@ class ImagePreview(QWidget):
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignCenter,
-                "尚未读取画面\n点击「读取画面」框选一次聊天窗口",
+                self._placeholder or "点击「开始采集」查看实时画面",
             )
         painter.end()

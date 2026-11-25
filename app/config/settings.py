@@ -4,7 +4,7 @@ Storage:
   - Non-sensitive config : %APPDATA%\\OCRChatAssistant\\config.json
   - API key             : Windows Credential Manager (keyring) first,
                           .env fallback for development.
-Read priority: environment variables > keyring > config.json.
+Process environment overrides saved settings. The developer .env supplies defaults.
 The API key is never logged and never written back into config.json.
 """
 from __future__ import annotations
@@ -13,8 +13,10 @@ import json
 import logging
 import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-from pydantic import BaseModel, Field, PrivateAttr
+from dotenv import dotenv_values
+from pydantic import BaseModel, PrivateAttr, ValidationError
 
 APP_NAME = "OCRChatAssistant"
 KEYRING_SERVICE = "llm_api_key"
@@ -64,23 +66,6 @@ def _keyring_set(service: str, value: str) -> bool:
         return False
 
 
-def _dotenv_write(key: str, value: str) -> None:
-    """Minimal .env writer used only as a dev fallback when keyring is unavailable."""
-    path = default_dotenv_path()
-    lines: list[str] = []
-    if path.exists():
-        lines = path.read_text(encoding="utf-8").splitlines()
-    replaced = False
-    for i, line in enumerate(lines):
-        if line.startswith(key + "="):
-            lines[i] = f"{key}={value}"
-            replaced = True
-            break
-    if not replaced:
-        lines.append(f"{key}={value}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 class Settings(BaseModel):
     """All user-facing configuration with spec defaults."""
 
@@ -112,8 +97,12 @@ class Settings(BaseModel):
     long_text_max_chars: int = 30000
     max_screenshots: int = 4
     llm_max_tokens: int = 2600
-    vision_defaulted_v2: bool = False  # 一次性迁移标记：v2 首次启动启用按需画面理解
-    fast_defaulted_v2: bool = False    # 一次性迁移标记：v2 首次启动默认快速解读
+
+    # Continuous scrolling capture (rebuild a transcript from many screenshots)
+    scroll_capture_interval_ms: int = 700   # sampling period while the user scrolls
+    scroll_max_queue: int = 6               # frames waiting for OCR before warning
+    scroll_min_overlap_lines: int = 2       # overlap needed to trust a merge
+    scroll_match_threshold: float = 0.70    # per-line similarity for a match
 
     # UI
     always_on_top: bool = True
@@ -139,6 +128,12 @@ class Settings(BaseModel):
         self.long_text_max_chars = max(2000, min(100000, int(self.long_text_max_chars)))
         self.max_screenshots = max(1, min(6, int(self.max_screenshots)))
         self.llm_max_tokens = max(512, min(16000, int(self.llm_max_tokens)))
+        self.scroll_capture_interval_ms = max(
+            300, min(2000, int(self.scroll_capture_interval_ms))
+        )
+        self.scroll_max_queue = max(2, min(16, int(self.scroll_max_queue)))
+        self.scroll_min_overlap_lines = max(1, min(5, int(self.scroll_min_overlap_lines)))
+        self.scroll_match_threshold = max(0.5, min(0.95, float(self.scroll_match_threshold)))
         return self
 
     @property
@@ -167,65 +162,70 @@ class Settings(BaseModel):
         use_keyring: bool = True,
     ) -> "Settings":
         try:
-            from dotenv import load_dotenv
-
-            load_dotenv(dotenv_path=dotenv_path or default_dotenv_path(), override=False)
-        except Exception:
-            pass
-
+            defaults = dotenv_values(dotenv_path or default_dotenv_path(), encoding="utf-8-sig")
+        except (OSError, UnicodeError) as exc:
+            logger.warning("developer .env unreadable (%s)", type(exc).__name__)
+            defaults = {}
         cfg = config_path or default_config_path()
         data: dict = {}
-        if cfg.exists():
-            try:
-                raw = json.loads(cfg.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    data = raw
-            except Exception as exc:
-                logger.warning("config.json unreadable, using defaults: %s", exc)
+        try:
+            raw = json.loads(cfg.read_text(encoding="utf-8-sig"))
+            if isinstance(raw, dict):
+                data = {name: value for name, value in raw.items()
+                        if name in cls.model_fields and name != "llm_api_key"}
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            logger.warning("config.json unreadable (%s), using defaults", type(exc).__name__)
 
-        data.pop("llm_api_key", None)  # never trusted from config.json
-
-        settings = cls(**{k: v for k, v in data.items() if k in cls.model_fields})
+        settings = cls._validate_saved_fields(data)
         settings._config_path = cfg
+        process_key = os.environ.get("LLM_API_KEY", "").strip()
+        saved_key = _keyring_get(KEYRING_SERVICE).strip() if use_keyring and not process_key else ""
+        settings.llm_api_key = process_key or saved_key or (defaults.get("LLM_API_KEY") or "").strip()
 
-        # API key: env > keyring
-        settings.llm_api_key = os.environ.get("LLM_API_KEY", "").strip()
-        if not settings.llm_api_key and use_keyring:
-            settings.llm_api_key = _keyring_get(KEYRING_SERVICE).strip()
-
-        # Other LLM fields: env > config.json
-        if os.environ.get("LLM_PROVIDER"):
-            settings.llm_provider = os.environ["LLM_PROVIDER"].strip()
-        if os.environ.get("LLM_BASE_URL"):
-            settings.llm_base_url = os.environ["LLM_BASE_URL"].strip()
-        if os.environ.get("LLM_MODEL"):
-            settings.llm_model = os.environ["LLM_MODEL"].strip()
-        if os.environ.get("LLM_TEMPERATURE"):
-            try:
-                settings.llm_temperature = float(os.environ["LLM_TEMPERATURE"])
-            except ValueError:
-                pass
-        if os.environ.get("LLM_TIMEOUT"):
-            try:
-                settings.llm_timeout = float(os.environ["LLM_TIMEOUT"])
-            except ValueError:
-                pass
-
+        for field in ("llm_provider", "llm_base_url", "llm_model", "llm_temperature", "llm_timeout"):
+            name = field.upper()
+            value = os.environ.get(name)
+            if not value and field not in data:
+                value = defaults.get(name)
+            if value:
+                try:
+                    current = getattr(settings, field)
+                    setattr(settings, field, type(current)(value.strip()))
+                except ValueError:
+                    logger.warning("invalid value for %s, retaining configured value", name)
         return settings.clamp()
 
-    def save(self, config_path: Path | None = None, use_keyring: bool = True) -> None:
+    @classmethod
+    def _validate_saved_fields(cls, data: dict) -> "Settings":
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            invalid = {error["loc"][0] for error in exc.errors(include_input=False)}
+            logger.warning("ignoring invalid settings fields: %s", ", ".join(sorted(invalid)))
+            for field in invalid:
+                data.pop(field, None)
+            return cls.model_validate(data)
+
+    def save(
+        self, config_path: Path | None = None, use_keyring: bool = True, *, write_api_key: bool = True,
+    ) -> None:
         self.clamp()
-        data = self.model_dump()
-        data.pop("llm_api_key", None)
+        data = self.model_dump(exclude={"llm_api_key"})
         cfg = config_path or self._config_path or default_config_path()
         cfg.parent.mkdir(parents=True, exist_ok=True)
-        cfg.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        if self.llm_api_key:
-            if use_keyring and _keyring_set(KEYRING_SERVICE, self.llm_api_key):
-                logger.info("API key saved to Windows Credential Manager")
-            else:
-                _dotenv_write("LLM_API_KEY", self.llm_api_key)
-                logger.warning(
-                    "keyring unavailable - API key written to local .env (gitignored) as dev fallback"
-                )
+        temporary = None
+        try:
+            with NamedTemporaryFile("w", dir=cfg.parent, prefix=".config-", suffix=".tmp",
+                                    encoding="utf-8", delete=False) as file:
+                temporary = Path(file.name)
+                json.dump(data, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+            if write_api_key and use_keyring and self.llm_api_key:
+                if not _keyring_set(KEYRING_SERVICE, self.llm_api_key):
+                    raise OSError("无法访问 Windows 凭据管理器，API Key 未保存。")
+            temporary.replace(cfg)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)

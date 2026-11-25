@@ -11,6 +11,8 @@ separately and the JSON ``thinking`` array acts as a fallback.
 """
 from __future__ import annotations
 
+import json
+
 from app.context.models import ConversationContext
 
 SYSTEM_PROMPT = """你是一名克制、细致的对话解码器，擅长读懂“谜语人”式的表达。
@@ -120,28 +122,33 @@ def build_long_user_prompt(
     *,
     image_count: int = 0,
     thinking_enabled: bool = True,
-    truncated: bool = False,
+    history_digest: str = "",
+    conversation_context: dict | None = None,
 ) -> str:
-    """Prompt for the on-demand decoder: one long conversation + optional screenshots."""
-    lines = ["【完整对话】", ""]
+    """Prompt for dialogue analysis with optional summarized history."""
+    lines = []
+    if conversation_context:
+        lines.extend(["【会话信息】", json.dumps(conversation_context, ensure_ascii=False), ""])
+    if history_digest:
+        lines.extend(["【较早对话摘要】", history_digest, "", "【最近对话原文】", ""])
+    else:
+        lines.extend(["【完整对话】", ""])
     if text.strip():
-        if truncated:
-            lines.append("（对话较长，程序保留了最近的部分；以下从较早处开始）")
         lines.append(text.strip())
     else:
         lines.append("（没有可读文本，请仅根据画面理解。）")
     lines.append("")
     lines.append("【对话任务】")
     lines.append("把这段对话当作一个整体来理解：")
-    lines.append("- 先梳理双方关系、最近的话题线、情绪变化和最后一次转折；")
-    lines.append("- 再解释最后一条消息，区分字面意思、可能的暗示/反话/试探/玩笑；")
+    lines.append("- 先梳理有迹可循的参与者关系、话题线、情绪变化和最后一次转折；")
+    lines.append("- 再解释最近一件具体的事，区分明确表达和可能的暗示、反话、试探或玩笑；")
     lines.append("- 如果对方像“谜语人”，请给出证据、至少一种替代解释，并保持不确定性；")
-    lines.append("- 回复建议要能直接接住这句话，语气自然，不操控、不编造。")
+    lines.append("- 回复建议要回应该事件当前的问题，语气自然，只依据对话给出的信息。")
     if image_count:
         lines.append("")
         lines.append("【画面】")
         lines.append(
-            f"本次附带 {image_count} 张按时间顺序截取的聊天界面截图。"
+            f"本次附带 {image_count} 张聊天界面截图，画面可能来自滚动历史，时间顺序以文字记录为准。"
             "请特别留意表情包、贴纸、emoji、图片、头像和气泡位置，"
             "并说明它们传达的情绪/潜台词；不要只依赖 OCR 文本。"
         )
@@ -163,6 +170,7 @@ def build_repair_user_prompt(raw_response: str, error: str) -> str:
         "请严格输出一个 JSON 对象，包含字段：thinking（数组，可空）, surface_meaning, "
         "possible_intent, emotion{label, confidence, evidence}, potential_needs, "
         "evidence（数组）, alternatives（数组）, reply_strategy, "
-        "suggested_replies[{style, text, why}], uncertainty。\n\n"
-        f"上次输出：\n{raw_response[:2400]}"
+        "suggested_replies[{style, text, why}], uncertainty。"
+        "若原输出包含 conversation_summary 或 recent_event，保留并修复这些字段。\n\n"
+        f"上次输出：\n{raw_response[:8000]}"
     )

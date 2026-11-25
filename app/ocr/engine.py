@@ -9,6 +9,7 @@ thread).
 from __future__ import annotations
 
 import logging
+import os
 from typing import Protocol
 
 from app.models.schemas import OCRLine, OCRResult
@@ -106,7 +107,17 @@ class PaddleOCREngine:
         try:
             if self._version >= (3, 0):
                 from paddleocr import PaddleOCR
+                from paddlex.utils.device import get_default_device
 
+                # Chat screenshots contain narrow text crops of varying widths.
+                # Single-line batches avoid padding the other crops to the
+                # widest line, and a small CPU pool reduces per-batch overhead.
+                cpu_options = {}
+                if get_default_device() == "cpu":
+                    cpu_options = {
+                        "cpu_threads": min(4, os.cpu_count() or 1),
+                        "text_recognition_batch_size": 1,
+                    }
                 self._ocr = PaddleOCR(
                     lang=lang,
                     use_textline_orientation=use_angle_cls,
@@ -117,6 +128,7 @@ class PaddleOCREngine:
                     # PIR executor (onednn_instruction.cc); plain CPU mode is
                     # stable on Windows. Verified 2026-09 on Windows 11.
                     enable_mkldnn=False,
+                    **cpu_options,
                 )
             else:
                 from paddleocr import PaddleOCR

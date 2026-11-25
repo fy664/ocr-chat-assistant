@@ -4,7 +4,13 @@
 ; .env / config.json / API key / user logs.
 
 #define AppName "言外"
-#define AppVersion "2.0.0"
+#define AppVersion "2.1.0"
+#ifndef PortableDir
+  #define PortableDir "..\_packaging\portable"
+#endif
+#ifndef InstallerDir
+  #define InstallerDir "..\_packaging\dist"
+#endif
 #define AppPublisher "fy664"
 #define AppURL "https://github.com/fy664/ocr-chat-assistant"
 
@@ -17,7 +23,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}/releases
-VersionInfoVersion=2.0.0.0
+VersionInfoVersion=2.1.0.0
 DefaultDirName={localappdata}\Programs\Yanwai
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -25,8 +31,8 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\_packaging\dist
-OutputBaseFilename=setup
+OutputDir={#InstallerDir}
+OutputBaseFilename=Yanwai-Setup-{#AppVersion}
 SetupIconFile=..\assets\app.ico
 UninstallDisplayIcon={app}\assets\app.ico
 UninstallDisplayName={#AppName}
@@ -47,7 +53,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："
 
 [Files]
-Source: "..\_packaging\portable\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PortableDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\runtime\pythonw.exe"; Parameters: """{app}\run.py"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\app.ico"

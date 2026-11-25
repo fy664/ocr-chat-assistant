@@ -41,4 +41,4 @@ def parse_analysis(content: str) -> AnalysisResult:
     try:
         return AnalysisResult.model_validate(data)
     except ValidationError as exc:
-        raise LLMParseError(f"Schema 校验失败: {exc}") from exc
+        raise LLMParseError(f"Schema 校验失败（{exc.error_count()} 个字段错误）") from exc

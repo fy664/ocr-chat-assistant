@@ -9,33 +9,28 @@ import logging
 import re
 from logging.handlers import RotatingFileHandler
 
-_SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9_\-]{6,}"),
-    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9_\-\.]{8,}"),
-    re.compile(r"(?i)(api[_-]?key[\"'=:\s]+)[A-Za-z0-9_\-\.]{8,}"),
-]
+_SECRET_PATTERNS = (
+    (re.compile(r"sk-[A-Za-z0-9_-]{6,}"), "***REDACTED***"),
+    (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9_.-]{8,}"), r"\1***REDACTED***"),
+    (re.compile(r"""(?i)(api[_-]?key["'=:\s]+)[A-Za-z0-9_.-]{8,}"""), r"\1***REDACTED***"),
+)
 
-_extra_secrets: list[str] = []
+_extra_secrets: set[str] = set()
 
 
 def register_secret(value: str) -> None:
-    if value and value not in _extra_secrets:
-        _extra_secrets.append(value)
+    if value:
+        _extra_secrets.add(value)
 
 
-class SecretRedactionFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            msg = record.getMessage()
-            for pattern in _SECRET_PATTERNS:
-                msg = pattern.sub(r"\1***REDACTED***", msg)
-            for secret in _extra_secrets:
-                msg = msg.replace(secret, "***REDACTED***")
-            record.msg = msg
-            record.args = ()
-        except Exception:
-            pass
-        return True
+class SecretRedactionFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        for secret in sorted(_extra_secrets.copy(), key=len, reverse=True):
+            message = message.replace(secret, "***REDACTED***")
+        for pattern, replacement in _SECRET_PATTERNS:
+            message = pattern.sub(replacement, message)
+        return message
 
 
 def setup_logging(debug: bool = False, secrets: list[str] | None = None) -> logging.Logger:
@@ -51,8 +46,7 @@ def setup_logging(debug: bool = False, secrets: list[str] | None = None) -> logg
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logger.propagate = False
 
-    fmt = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-
+    formatter = SecretRedactionFormatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
     try:
         file_handler = RotatingFileHandler(
             default_logs_dir() / "app.log",
@@ -60,18 +54,15 @@ def setup_logging(debug: bool = False, secrets: list[str] | None = None) -> logg
             backupCount=3,
             encoding="utf-8",
         )
-        file_handler.setFormatter(fmt)
-        file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+        file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-    except Exception:
+    except OSError:
         pass
 
     console = logging.StreamHandler()
-    console.setFormatter(fmt)
+    console.setFormatter(formatter)
     console.setLevel(logging.DEBUG if debug else logging.WARNING)
     logger.addHandler(console)
-
-    logger.addFilter(SecretRedactionFilter())
     return logger
 
 

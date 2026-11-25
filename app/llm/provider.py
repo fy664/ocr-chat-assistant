@@ -16,6 +16,7 @@ from typing import Protocol
 from app.llm.parser import LLMParseError, parse_analysis
 from app.llm.prompt import REPAIR_SYSTEM_PROMPT, build_repair_user_prompt
 from app.models.schemas import AnalysisResult
+from app.utils.logger import register_secret
 
 logger = logging.getLogger("ocr_chat.llm")
 
@@ -152,9 +153,14 @@ class OpenAICompatibleClient:
 
     def __init__(self, config: LLMConfig, max_retries: int = 1):
         self._config = config
+        register_secret(config.api_key)
         self._max_retries = max_retries
+        self._sdk_client = None
 
     # ---- LLMClient interface ----------------------------------------------
+
+    def summarize_history(self, system_prompt: str, context: str) -> str:
+        return self._chat(system_prompt, context, max_tokens=1100)
 
     def analyze(self, system_prompt: str, context: str, images=None) -> AnalysisResult:
         raw = self._chat(system_prompt, context, images=images)
@@ -235,7 +241,7 @@ class OpenAICompatibleClient:
             if not first_token and not content_parts and not reasoning_parts:
                 if on_status:
                     on_status("fallback")
-                logger.warning("streaming unavailable, falling back to non-stream: %s", exc)
+                logger.warning("streaming unavailable, falling back to non-stream (%s)", type(exc).__name__)
                 return self.analyze(system_prompt, context, images=images)
             raise LLMError(_friendly_error(exc)) from exc
 
@@ -294,12 +300,19 @@ class OpenAICompatibleClient:
     def _make_client(self):
         import openai
 
-        return openai.OpenAI(
-            api_key=self._config.api_key,
-            base_url=self._config.base_url,
-            timeout=self._config.timeout,
-            max_retries=self._max_retries,
-        )
+        if self._sdk_client is None:
+            self._sdk_client = openai.OpenAI(
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+                timeout=self._config.timeout,
+                max_retries=self._max_retries,
+            )
+        return self._sdk_client
+
+    def close(self) -> None:
+        client, self._sdk_client = self._sdk_client, None
+        if client is not None:
+            client.close()
 
     def _build_messages(self, system_prompt: str, user_prompt: str, images=None):
         if not images:
@@ -317,7 +330,7 @@ class OpenAICompatibleClient:
             {"role": "user", "content": user_content},
         ]
 
-    def _chat(self, system_prompt: str, user_prompt: str, images=None) -> str:
+    def _chat(self, system_prompt: str, user_prompt: str, images=None, *, max_tokens=None) -> str:
         try:
             client = self._make_client()
             request = {
@@ -325,8 +338,9 @@ class OpenAICompatibleClient:
                 "messages": self._build_messages(system_prompt, user_prompt, images),
                 "temperature": self._config.temperature,
             }
-            if self._config.max_tokens:
-                request["max_tokens"] = int(self._config.max_tokens)
+            token_limit = max_tokens if max_tokens is not None else self._config.max_tokens
+            if token_limit:
+                request["max_tokens"] = int(token_limit)
             response = client.chat.completions.create(**request)
         except LLMError:
             raise

@@ -43,6 +43,7 @@ CARD_TONES = {
 
 def _label(text: str, object_name: str, *, wrap: bool = True, selectable: bool = True) -> QLabel:
     label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setObjectName(object_name)
     label.setWordWrap(wrap)
     if selectable:
@@ -198,6 +199,32 @@ class AnalysisCards(QWidget):
 
     def _build_cards(self, result: AnalysisResult) -> list[QFrame]:
         cards: list[QFrame] = []
+
+        summary = result.conversation_summary
+        if summary is not None:
+            card, layout = _card("长篇对话总结", CARD_TONES["当前理解"])
+            if summary.overview:
+                layout.addWidget(_label(summary.overview, "cardBody"))
+            for title, items in (("进展", summary.timeline), ("已定事项", summary.decisions),
+                                 ("待确认", summary.open_questions)):
+                if items:
+                    text = title + "\n" + "\n".join(f"• {item}" for item in items)
+                    layout.addWidget(_label(text, "cardBody"))
+            cards.append(card)
+
+        event = result.recent_event
+        if event is not None:
+            card, layout = _card("最近一件事", CARD_TONES["建议策略"])
+            layout.addWidget(_label(event.topic, "cardTitle"))
+            if event.description:
+                layout.addWidget(_label(event.description, "cardBody"))
+            if event.participants:
+                layout.addWidget(_label("相关发言者 · " + "、".join(event.participants), "mutedText"))
+            if event.needs_reply is not None:
+                layout.addWidget(_label("建议回应" if event.needs_reply else "可暂不回应", "mutedText"))
+            if result.event_sources:
+                layout.addWidget(self._chip_block(result.event_sources))
+            cards.append(card)
 
         card, layout = _card("当前理解", CARD_TONES["当前理解"])
         layout.addWidget(_label(result.surface_meaning or "—", "cardBody"))

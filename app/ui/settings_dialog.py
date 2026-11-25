@@ -1,4 +1,4 @@
-"""Settings dialog: LLM / Realtime / UI.
+"""Settings dialog for model, capture, analysis and display.
 
 The connection test runs on a background thread (HTTP must never block the
 GUI thread). The API key is shown masked and never printed to logs.
@@ -41,7 +41,10 @@ class _TestConnectionThread(QThread):
 
     def run(self) -> None:
         client = OpenAICompatibleClient(self._config, max_retries=0)
-        result = client.test_connection()
+        try:
+            result = client.test_connection()
+        finally:
+            client.close()
         self.finished_test.emit(result.ok, result.message)
 
 
@@ -136,44 +139,28 @@ class SettingsDialog(QDialog):
 
         self._tabs.addTab(llm_tab, "LLM")
 
-        # ---- Realtime tab -----------------------------------------------------
-        rt_tab = QWidget()
-        rt_form = self._make_form(rt_tab)
-
+        capture_tab = QWidget()
+        capture_form = self._make_form(capture_tab)
         self._interval_spin = QSpinBox()
-        self._interval_spin.setRange(500, 3000)
+        self._interval_spin.setRange(300, 2000)
         self._interval_spin.setSingleStep(100)
-        self._interval_spin.setValue(int(settings.capture_interval_ms))
+        self._interval_spin.setValue(settings.scroll_capture_interval_ms)
         self._interval_spin.setSuffix(" ms")
         self._tidy_spin(self._interval_spin)
-        rt_form.addRow("OCR 采样间隔", self._interval_spin)
+        capture_form.addRow("滚动 OCR 采样间隔", self._interval_spin)
 
-        self._debounce_spin = QSpinBox()
-        self._debounce_spin.setRange(300, 1500)
-        self._debounce_spin.setSingleStep(100)
-        self._debounce_spin.setValue(int(settings.debounce_ms))
-        self._debounce_spin.setSuffix(" ms")
-        self._tidy_spin(self._debounce_spin)
-        rt_form.addRow("防抖等待", self._debounce_spin)
+        self._queue_spin = QSpinBox()
+        self._queue_spin.setRange(2, 16)
+        self._queue_spin.setValue(settings.scroll_max_queue)
+        self._queue_spin.setSuffix(" 帧")
+        self._tidy_spin(self._queue_spin)
+        capture_form.addRow("OCR 等待队列", self._queue_spin)
 
-        self._max_messages_spin = QSpinBox()
-        self._max_messages_spin.setRange(5, 100)
-        self._max_messages_spin.setValue(int(settings.max_context_messages))
-        self._tidy_spin(self._max_messages_spin)
-        rt_form.addRow("最大上下文条数", self._max_messages_spin)
-
-        self._max_chars_spin = QSpinBox()
-        self._max_chars_spin.setRange(1000, 50000)
-        self._max_chars_spin.setSingleStep(500)
-        self._max_chars_spin.setValue(int(settings.max_context_chars))
-        self._tidy_spin(self._max_chars_spin)
-        rt_form.addRow("最大上下文字符", self._max_chars_spin)
-
-        interval_hint = QLabel("推荐组合：采样 2000ms + 防抖 700ms。采样越密，OCR 越忙但更实时。")
+        interval_hint = QLabel("实时预览独立刷新。OCR 跟不上滚动时，可放慢滚动或增加采样间隔。")
         interval_hint.setObjectName("dialogHint")
         interval_hint.setWordWrap(True)
-        rt_form.addRow("", interval_hint)
-
+        capture_form.addRow("", interval_hint)
+        self._tabs.addTab(capture_tab, "采集")
 
         # ---- Analysis tab -----------------------------------------------------
         an_tab = QWidget()
@@ -251,13 +238,10 @@ class SettingsDialog(QDialog):
         perf_title = QLabel("长文与输出")
         perf_title.setObjectName("infoTitle")
         perf_layout.addWidget(perf_title)
-        self._gate_check = QCheckBox("跳过完全相同的帧（旧版实时引擎）")
-        self._gate_check.setChecked(bool(settings.fast_frame_gate))
-        self._gate_check.setVisible(False)
 
         long_row = QHBoxLayout()
         long_row.setSpacing(8)
-        long_label = QLabel("长文上限")
+        long_label = QLabel("单次上下文")
         long_label.setObjectName("dialogHint")
         self._long_text_spin = QSpinBox()
         self._long_text_spin.setRange(5000, 100000)
@@ -319,9 +303,6 @@ class SettingsDialog(QDialog):
         self._always_on_top_check.setChecked(bool(settings.always_on_top))
         behavior_layout.addWidget(self._always_on_top_check)
 
-        self._auto_start_check = QCheckBox("启动时自动开始监控（需要已保存的区域）")
-        self._auto_start_check.setChecked(bool(settings.auto_start_monitoring))
-        self._auto_start_check.setVisible(False)
         ui_layout.addWidget(behavior)
 
         ui_layout.addWidget(
@@ -420,7 +401,7 @@ class SettingsDialog(QDialog):
             base_url=self._base_url_edit.text().strip(),
             model=self._model_edit.text().strip(),
             temperature=float(self._temperature_spin.value()),
-            timeout=float(self._timeout_spin.value()),
+            timeout=min(15, self._timeout_spin.value()),
         )
 
     def _on_test_connection(self) -> None:
@@ -438,14 +419,31 @@ class SettingsDialog(QDialog):
         self._set_test_message("正在测试连接…", "gray")
         self._test_thread = _TestConnectionThread(config, self)
         self._test_thread.finished_test.connect(self._on_test_finished)
+        self._test_thread.finished.connect(self._release_test_thread)
         self._test_thread.start()
 
     def _on_test_finished(self, ok: bool, message: str) -> None:
-        self._test_button.setEnabled(True)
         self._set_test_message(message, "ok" if ok else "error")
 
+    def _release_test_thread(self) -> None:
+        thread, self._test_thread = self._test_thread, None
+        if thread is not None:
+            thread.deleteLater()
+        self._test_button.setEnabled(True)
+
+    def done(self, result: int) -> None:
+        if self._test_thread is not None and self._test_thread.isRunning():
+            self._tabs.setCurrentIndex(0)
+            self._set_test_message("正在完成连接测试，请稍候。", "gray")
+            return
+        super().done(result)
+
     def _on_save(self) -> None:
-        s = self._settings
+        if self._test_thread is not None and self._test_thread.isRunning():
+            self._tabs.setCurrentIndex(0)
+            self._set_test_message("请等连接测试结束后再保存。", "gray")
+            return
+        s = self._settings.model_copy(deep=True)
         s.llm_provider = self._provider_edit.text().strip() or "custom"
         api_key = self._api_key_edit.text().strip()
         if api_key:
@@ -454,25 +452,24 @@ class SettingsDialog(QDialog):
         s.llm_model = self._model_edit.text().strip()
         s.llm_temperature = float(self._temperature_spin.value())
         s.llm_timeout = float(self._timeout_spin.value())
-        s.capture_interval_ms = int(self._interval_spin.value())
-        s.debounce_ms = int(self._debounce_spin.value())
-        s.max_context_messages = int(self._max_messages_spin.value())
-        s.max_context_chars = int(self._max_chars_spin.value())
+        s.scroll_capture_interval_ms = self._interval_spin.value()
+        s.scroll_max_queue = self._queue_spin.value()
         s.thinking_enabled = self._thinking_check.isChecked()
         s.thinking_auto_collapse = self._thinking_collapse_check.isChecked()
         s.vision_enabled = self._vision_check.isChecked()
         s.vision_max_side = int(self._vision_max_spin.value())
         s.vision_quality = int(self._vision_quality_spin.value())
-        s.fast_frame_gate = self._gate_check.isChecked()
         s.long_text_max_chars = int(self._long_text_spin.value())
         s.max_screenshots = int(self._max_shots_spin.value())
         s.llm_max_tokens = int(self._max_tokens_spin.value())
         s.always_on_top = self._always_on_top_check.isChecked()
-        s.auto_start_monitoring = self._auto_start_check.isChecked()
         try:
-            s.save()
-        except Exception as exc:
-            logger.warning("settings save failed: %s", exc)
+            s.save(write_api_key=s.llm_api_key != self._settings.llm_api_key)
+        except OSError as exc:
+            logger.warning("settings save failed (%s)", type(exc).__name__)
+            self._tabs.setCurrentIndex(0)
+            self._set_test_message(f"保存失败。{exc}", "error")
+            return
         self._result = {
             "settings": s,
             "always_on_top": s.always_on_top,

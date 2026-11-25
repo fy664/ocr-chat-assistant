@@ -1,11 +1,8 @@
-# 言外 Yanwai - one-click run (Windows)
-# Uses the project .venv and starts the app. Run:  .\run.ps1  (extra args are passed to run.py)
+# 言外 · 使用项目自带的虚拟环境启动，可从其他目录调用。
 $ErrorActionPreference = "Stop"
-
-if (-not (Test-Path ".venv\Scripts\python.exe")) {
-    Write-Host ".venv not found. Please run .\setup.ps1 first." -ForegroundColor Yellow
-    exit 1
+$python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    throw "找不到 .venv，请运行项目目录下的 setup.ps1。"
 }
-
-& ".\.venv\Scripts\python.exe" run.py @args
+& $python (Join-Path $PSScriptRoot "run.py") @args
 exit $LASTEXITCODE

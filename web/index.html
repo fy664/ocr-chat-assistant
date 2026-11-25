@@ -187,7 +187,7 @@
   <div class="container">
     <div class="section-head reveal">
       <span class="eyebrow"><i class="live-dot"></i>能力清单</span>
-      <h2>不持续监控，只在你点击解读时</h2>
+      <h2>按需采集和解读</h2>
       <p class="lead">言外不是盯屏软件，而是一次性的深读工具：你把长文或画面交给它，它把言外之意拆开给你。</p>
     </div>
 
@@ -216,12 +216,12 @@
           <span class="feature-kicker">LONG CONTEXT</span>
         </div>
         <h3>长文理解：把整段对话读完</h3>
-        <p>最多 30,000 字（可调）。先梳理双方关系、话题线与情绪转折，再解释最后一句——不是只看最后一屏。</p>
+        <p>超过单次上下文预算的记录会先分段归纳。结合历史摘要和最近原文，总结话题脉络并识别最近一件事。</p>
         <div class="fx fx-diff" aria-hidden="true">
           <div class="diff-rows">
             <div class="diff-row same"><i>01</i><span>双方关系 / 最近话题线</span><b>全文</b></div>
             <div class="diff-row add"><i>02</i><span>情绪变化与最后一次转折</span><b>线索</b></div>
-            <div class="diff-row changed"><i>03</i><span>最后一句的暗示 / 试探</span><b>解读</b></div>
+            <div class="diff-row changed"><i>03</i><span>最近一件事和回复</span><b>解读</b></div>
           </div>
         </div>
         <div class="tags"><span>30k 字</span><span>人物关系</span><span>话题线</span></div>
@@ -280,7 +280,7 @@
           <span class="feature-kicker">MULTI-CAPTURE</span>
         </div>
         <h3>聊天太长，就再读一次</h3>
-        <p>向上滚动聊天记录，再点一次「读取画面」即可追加文本和截图；最多保留 4 张画面，长记录不会被一屏截断。</p>
+        <p>一次框选后，滚动聊天记录即可拼接多屏内容。左栏帮助定位群聊或私聊，右栏读取发言者和消息。</p>
         <div class="fx fx-window" aria-hidden="true">
           <div class="win-stack">
             <span class="stack-win back"></span>
@@ -342,7 +342,7 @@
           <span class="pipe-index">03</span>
           <div class="pipe-body">
             <h3>长文整理</h3>
-            <p>整理全文、截断过长部分，并把多张截图编码为压缩 JPEG，准备一次请求。</p>
+            <p>分段归纳较早对话，结合最近原文和消息区截图完成解读。</p>
             <div class="pipe-meta"><span>30k 字</span><span>4 张画面</span><span>JPEG</span></div>
           </div>
         </li>
@@ -369,7 +369,7 @@
           <span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>
           <div class="code-tabs" role="tablist" aria-label="实现细节">
             <button class="code-tab is-active" type="button" role="tab" aria-selected="true" data-tab="result">analysis.json</button>
-            <button class="code-tab" type="button" role="tab" aria-selected="false" data-tab="decoder">decoder.py</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-tab="decoder">解读流程</button>
             <button class="code-tab" type="button" role="tab" aria-selected="false" data-tab="prompt">system_prompt.md</button>
           </div>
         </div>
@@ -389,15 +389,12 @@
 <span class="tok-p">}</span></code></pre>
           </div>
           <div class="code-pane" data-pane="decoder" role="tabpanel" hidden>
-<pre><code><span class="tok-c"># 按需一次：不启动采样循环，不持有历史帧</span>
-<span class="tok-k">def</span> <span class="tok-f">decode</span><span class="tok-p">(</span>text<span class="tok-p">,</span> images<span class="tok-p">):</span>
-    text <span class="tok-p">=</span> clamp<span class="tok-p">(</span>text<span class="tok-p">,</span> max_chars<span class="tok-p">=</span><span class="tok-n">30000</span><span class="tok-p">)</span>   <span class="tok-c"># 保留最近部分</span>
-    images <span class="tok-p">=</span> images<span class="tok-p">[</span><span class="tok-p">-</span><span class="tok-n">4</span><span class="tok-p">:]</span>                     <span class="tok-c"># 最多 4 张</span>
-    worker <span class="tok-p">=</span> DecodeWorker<span class="tok-p">(</span>text<span class="tok-p">,</span> images<span class="tok-p">,</span> deep<span class="tok-p">=</span><span class="tok-k">False</span><span class="tok-p">)</span>
-    worker<span class="tok-p">.</span>start<span class="tok-p">()</span>                        <span class="tok-c"># UI 不阻塞</span>
+<pre><code>选择聊天窗口 → 本地 OCR → 会话类型与发言者识别
+滚动采集 → 拼接可见消息 → 编辑对话记录
 
-<span class="tok-c"># 结果经 Pydantic 校验后才交给界面；</span>
-<span class="tok-c"># 不监控、不防抖、不重复调用。</span></code></pre>
+较早对话摘要 + 最近原文 + 可选消息区截图
+    → 整段总结、最近事件、回复建议
+    → 校验事件引用并展示对应原文</code></pre>
 </div>
           <div class="code-pane" data-pane="prompt" role="tabpanel" hidden>
 <pre><code><span class="tok-c"># System Prompt 摘要（app/llm/prompt.py）</span>
@@ -433,7 +430,7 @@
       <article class="privacy-card leaves reveal">
         <header>
           <span class="privacy-icon"><svg class="icon"><use href="#i-arrow"/></svg></span>
-          <div><h3>只在你点击「解读」时发送</h3><p>发给用户自己配置的 LLM 接口</p></div>
+          <div><h3>启用自动解读或手动提交时发送</h3><p>发给用户自己配置的 LLM 接口</p></div>
         </header>
         <ul>
           <li><span>整段对话文本<small>你粘贴的全文 + OCR 读取的文字</small></span><em>01</em></li>
@@ -454,7 +451,7 @@
           <div><h3>不会离开这台电脑的部分</h3><p>截图零落盘，密钥进系统钥匙串</p></div>
         </header>
         <ul>
-          <li><span>屏幕截图<small>只在你主动读取并解读时发送；从不写磁盘</small></span><em>01</em></li>
+          <li><span>屏幕截图<small>仅在解读时发送已保留的消息区截图，截图存于内存</small></span><em>01</em></li>
           <li><span>长文编辑器<small>只保存在本次运行内存</small></span><em>02</em></li>
           <li><span>API Key<small>Windows 凭据管理器</small></span><em>03</em></li>
           <li><span>日志<small>不含 Key 与完整聊天内容</small></span><em>04</em></li>
@@ -499,7 +496,7 @@
       <article class="step reveal" data-delay="2">
         <span class="step-num">03</span>
         <h3>粘贴或读取画面</h3>
-        <p>把完整聊天记录粘贴进左侧；或点击「读取画面」框选一次聊天窗口。聊天太长就向上滚动再读一次，文本和画面会追加。</p>
+        <p>粘贴记录，或框选左侧会话列表和右侧聊天区。读长对话可点「开始采集」，滚动记录后结束采集。</p>
         <div class="keys-row">
           <span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd> 读取画面</span>
           <span><kbd>Ctrl</kbd><kbd>Enter</kbd> 解读</span>
@@ -548,7 +545,7 @@
       </div>
       <div class="faq-item">
         <button class="faq-q" type="button" aria-expanded="false"><span>它会把我的聊天截图传到服务器吗？</span><i></i></button>
-        <div class="faq-a"><div><p>只有你点击「解读」时才会。言外不会持续监控，也不会后台扫屏；你手动读取的画面会压缩成 JPEG，和整段对话一起发送给你配置的模型服务商。视觉默认开启（因为表情包/贴纸是言外的核心），可在「设置 → 解读」里关闭；关闭后画面只在本地预览，不发任何图片。截图从不写入磁盘。</p></div></div>
+        <div class="faq-a"><div><p>点击「解读」或启用「采集后自动解读」后，言外将聊天上下文交给你配置的模型服务商。启用视觉时可附带压缩后的消息区截图。视觉默认开启（因为表情包/贴纸是言外的核心），可在「设置 → 解读」里关闭；关闭后画面只在本地预览，不发任何图片。截图从不写入磁盘。</p></div></div>
       </div>
 
       <div class="faq-item">
@@ -561,7 +558,7 @@
       </div>
       <div class="faq-item">
         <button class="faq-q" type="button" aria-expanded="false"><span>聊天太长、滚出画面怎么办？</span><i></i></button>
-        <div class="faq-a"><div><p>两个办法：把完整聊天记录直接粘贴进左侧编辑器（默认支持 30,000 字，可在设置里调）；或者向上滚动聊天记录，再点一次「读取画面」，程序会把新文字追加到已有内容里，并保留最多 4 张截图。长文不会因为一屏装不下就丢掉前文。</p></div></div>
+        <div class="faq-a"><div><p>可以粘贴聊天记录，也可以启动滚动采集。超出单次上下文预算后，言外会按段归纳较早记录，再结合最近原文生成整段总结。</p></div></div>
       </div>
       <div class="faq-item">
         <button class="faq-q" type="button" aria-expanded="false"><span>会不会自动帮我回复？</span><i></i></button>

@@ -55,12 +55,16 @@ TONE_COLORS: dict[str, QColor] = {
 
 def tone_for_state(text: str) -> str:
     """Map a scheduler state label to a visual tone."""
-    if "完成" in text:
+    if "完成" in text or text.startswith("已采集"):
         return "green"
     if "错误" in text or "失败" in text:
         return "red"
     if "暂停" in text or "等待" in text:
         return "amber"
+    if "收尾" in text:
+        return "amber"
+    if "采集" in text:
+        return "cyan"
     if "分析" in text or "OCR" in text or "选择" in text:
         return "cyan"
     if "监控" in text:

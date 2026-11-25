@@ -2,16 +2,26 @@
 
 No continuous monitoring: the user pastes a long conversation and/or captures
 one or more screenshots, then asks for a single decode.
+
+v2.1 adds 「开始采集 / 结束采集」: the user selects the chat region once, then
+scrolls the chat while only the local OCR + stitcher run. The result lands in
+the editor (undoable), can be copied/exported, and the existing decode button
+sends it to the model as usual.
 """
 from __future__ import annotations
 
 import logging
+import sys
 import time
+from html import escape
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,11 +39,13 @@ from app.ui.floating_panel import AnalysisCards, ReplyList
 from app.ui.panels import ImagePreview, PipelinePanel, ThinkingPanel
 from app.ui.status_bar import AppStatusBar
 from app.ui.styles import APP_QSS
+from app.ui.window_picker import WindowPicker
 from app.ui.widgets import (
     AMBER,
     CYAN,
     GREEN,
     MUTED,
+    RED,
     TONE_COLORS,
     Backdrop,
     BrandMark,
@@ -45,7 +57,17 @@ from app.ui.widgets import (
     tone_for_state,
 )
 
-logger = logging.getLogger("yanwai.ui.decoder")
+logger = logging.getLogger("ocr_chat.ui.decoder")
+
+# Collect-strip copy. Kept as module constants so tests can assert on wording
+# without duplicating strings.
+COLLECT_IDLE_TEXT = "滚动采集：未开始 · 选择聊天窗口和消息区，然后上下滚动"
+COLLECT_ARMING_TEXT = "滚动采集：选区中 · 请在窗口预览里框选消息区"
+COLLECT_RUNNING_TEXT = "滚动采集：采集中 · 缓慢滚动，识别与拼接都在本机完成"
+COLLECT_PAUSED_TEXT = "滚动采集：已暂停 · 恢复原窗口或查看状态提示"
+COLLECT_STOPPING_TEXT = "滚动采集：收尾中 · 正在识别队列里剩下的画面"
+COLLECT_DONE_TEXT = "滚动采集：已采集 · 可编辑、复制、导出，或直接解读"
+COLLECT_EMPTY_TEXT = "滚动采集：未识别到文字 · 请缩小选区或放慢滚动后重试"
 
 
 class DecoderWindow(QMainWindow):
@@ -56,7 +78,15 @@ class DecoderWindow(QMainWindow):
         self._controller = controller
         self._settings = settings
         self._selector: RegionSelector | None = None
-        self._capture_after_select = False
+        # What to do once the user finishes selecting a region:
+        # "capture" = read one screen, "collect" = start scrolling collection.
+        self._pending_action: str | None = None
+        self._last_export_path: str | None = None
+        self._replace_next_capture = False
+        self._collection_preview_state = ""
+        self._close_timer = QTimer(self)
+        self._close_timer.setInterval(100)
+        self._close_timer.timeout.connect(self.close)
 
         self.setWindowTitle("言外 · 对话解码器")
         self.setMinimumSize(780, 680)
@@ -78,6 +108,7 @@ class DecoderWindow(QMainWindow):
 
         root.addLayout(self._build_header())
         root.addWidget(self._build_region_strip())
+        root.addWidget(self._build_collect_strip())
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +190,7 @@ class DecoderWindow(QMainWindow):
         self._region_dot = GlowDot(MUTED, size=9)
         self._region_label = QLabel("尚未选区")
         self._region_label.setObjectName("regionText")
+        self._region_label.setTextFormat(Qt.TextFormat.PlainText)
         self._region_dot.set_color(MUTED)
         hint = QLabel("Ctrl+Shift+S 读取 · Ctrl+Enter 解读")
         hint.setObjectName("shortcutHint")
@@ -167,17 +199,65 @@ class DecoderWindow(QMainWindow):
         layout.addWidget(hint)
         return strip
 
+    def _build_collect_strip(self) -> QFrame:
+        """Rolling-capture bar: start / stop / live counters.
+
+        Kept separate from the region strip because it has its own lifecycle:
+        it stays alive across many frames while the region strip only reports
+        a one-shot selection.
+        """
+        strip = QFrame()
+        strip.setObjectName("collectStrip")
+        layout = QHBoxLayout(strip)
+        layout.setContentsMargins(11, 5, 9, 5)
+        layout.setSpacing(7)
+        self._collect_dot = GlowDot(MUTED, size=9)
+        self._collect_label = QLabel(COLLECT_IDLE_TEXT)
+        self._collect_label.setObjectName("collectText")
+        self._collect_badge = QLabel("")
+        self._collect_badge.setObjectName("collectBadge")
+        self._collect_badge.hide()
+
+        self._collect_button = QPushButton("开始采集")
+        self._collect_button.setObjectName("collectStart")
+        self._collect_button.setMinimumHeight(26)
+        self._collect_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._collect_button.setToolTip(
+            "框选一次聊天区域，然后在聊天窗口里缓慢上下滚动；识别与拼接全部在本机完成"
+        )
+        self._collect_button.clicked.connect(self._on_collect_clicked)
+
+        self._stop_collect_button = QPushButton("结束采集")
+        self._stop_collect_button.setObjectName("collectStop")
+        self._stop_collect_button.setMinimumHeight(26)
+        self._stop_collect_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_collect_button.setEnabled(False)
+        self._stop_collect_button.setToolTip("停止滚动并等已入队的画面识别完，再输出拼接结果")
+        self._stop_collect_button.clicked.connect(self._on_stop_collect_clicked)
+
+        layout.addWidget(self._collect_dot)
+        layout.addWidget(self._collect_label, 1)
+        layout.addWidget(self._collect_badge)
+        layout.addWidget(self._collect_button)
+        layout.addWidget(self._stop_collect_button)
+        return strip
+
     def _build_left_column(self) -> QVBoxLayout:
         column = QVBoxLayout()
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(10)
 
-        editor_card = SectionCard("对话内容", "粘贴 · 框选 · 可继续追加", CYAN)
+        editor_card = SectionCard("对话内容", "粘贴 · 滚动采集 · 可编辑导出", CYAN)
+        self._conversation_label = QLabel()
+        self._conversation_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._conversation_label.hide()
+        editor_card.add_widget(self._conversation_label)
         self._editor = QPlainTextEdit()
         self._editor.setObjectName("conversationEditor")
         self._editor.setPlaceholderText(
             "把完整聊天记录粘贴到这里（建议保留「对方：」「我：」这样的说话人标签）。\n\n"
-            "也可以点击下方「读取画面」框选一次聊天窗口；聊天太长时，滚动后再次读取即可追加。"
+            "可以框选包含左侧会话列表和右侧消息区的窗口。聊天很长时，点「开始采集」并上下滚动；"
+            "程序会在本地识别发言者和消息，结束后可编辑、复制或导出。"
         )
         self._editor.textChanged.connect(self._on_editor_changed)
         editor_card.add_widget(self._editor, 1)
@@ -186,11 +266,23 @@ class DecoderWindow(QMainWindow):
         footer.setSpacing(7)
         self._char_label = QLabel("0 字")
         self._char_label.setObjectName("charCount")
-        self._char_hint = QLabel("长文上限 30,000 字 · 超出会保留最近部分")
+        self._char_hint = QLabel("单次上下文 30,000 字 · 超出分段归纳")
         self._char_hint.setObjectName("charHint")
         footer.addWidget(self._char_label)
         footer.addWidget(self._char_hint)
         footer.addStretch(1)
+        self._copy_button = QPushButton("复制全文")
+        self._copy_button.setObjectName("linkButton")
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_button.setToolTip("把编辑区里的全部文字写入剪贴板")
+        self._copy_button.clicked.connect(self._on_copy_text)
+        footer.addWidget(self._copy_button)
+        self._export_button = QPushButton("导出 TXT")
+        self._export_button.setObjectName("linkButton")
+        self._export_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._export_button.setToolTip("另存为 UTF-8 无 BOM 的纯文本，可直接放进论文附录")
+        self._export_button.clicked.connect(self._on_export_text)
+        footer.addWidget(self._export_button)
         clear_text = QPushButton("清空文本")
         clear_text.setObjectName("linkButton")
         clear_text.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -223,7 +315,7 @@ class DecoderWindow(QMainWindow):
         self._vision_dot = GlowDot(GREEN, size=8)
         self._vision_caption = QLabel("")
         self._vision_caption.setObjectName("visionCaption")
-        clear_images = QPushButton("清空画面")
+        clear_images = QPushButton("清空附件")
         clear_images.setObjectName("linkButton")
         clear_images.setCursor(Qt.CursorShape.PointingHandCursor)
         clear_images.clicked.connect(self._on_clear_images)
@@ -303,8 +395,14 @@ class DecoderWindow(QMainWindow):
         self._analyze_button.setToolTip("把左侧全文和已读取的画面一起交给模型（Ctrl+Enter）")
         self._analyze_button.clicked.connect(self._on_analyze_clicked)
 
+        self._auto_analysis = QCheckBox("采集后自动解读")
+        self._auto_analysis.setObjectName("autoAnalysisCheck")
+        self._auto_analysis.setToolTip(
+            "勾选后，读取或滚动采集完成时把对话交给配置的模型；开启视觉时还会附带消息区截图。"
+        )
         actions.addWidget(self._reselect_button)
         actions.addWidget(self._read_button)
+        actions.addWidget(self._auto_analysis)
         actions.addWidget(self._deep_check)
         actions.addStretch(1)
         actions.addWidget(self._analyze_button, 2)
@@ -324,6 +422,8 @@ class DecoderWindow(QMainWindow):
         c.frame_preview.connect(self._preview.set_frame)
         c.images_changed.connect(self._on_images_changed)
         c.capture_completed.connect(self._on_capture_completed)
+        c.conversation_changed.connect(self._show_conversation)
+        c.capture_conversation_switched.connect(self._replace_when_read)
         c.analysis_started.connect(self._on_analysis_started)
         c.thinking_started.connect(self._thinking.begin)
         c.thinking_delta.connect(self._thinking.append)
@@ -332,6 +432,10 @@ class DecoderWindow(QMainWindow):
         c.last_update.connect(self._status_bar.set_last_update)
         c.metrics_updated.connect(self._on_metrics)
         c.cleared.connect(self._on_cleared)
+        c.collection_state_changed.connect(self._on_collection_state_changed)
+        c.collection_status.connect(self._on_collection_status)
+        c.collection_hint.connect(self._on_collection_hint)
+        c.collection_completed.connect(self._on_collection_completed)
 
     def _apply_ui_settings(self) -> None:
         self._thinking.set_enabled(True)
@@ -339,9 +443,6 @@ class DecoderWindow(QMainWindow):
         self._deep_check.setChecked(bool(self._settings.thinking_enabled))
         self._deep_check.setToolTip(
             "开启后使用推理模型的流式思考，通常需要 30–60 秒；默认快速解读。"
-        )
-        self._char_hint.setText(
-            f"长文上限 {self._settings.long_text_max_chars:,} 字 · 超出会保留最近部分"
         )
         self._update_vision_caption()
         self._on_editor_changed()
@@ -355,9 +456,9 @@ class DecoderWindow(QMainWindow):
         over = count > limit
         set_tone(self._char_label, "warn" if over else "muted")
         self._char_hint.setText(
-            f"已超出 {count - limit:,} 字，解读时会保留最近部分"
+            f"超出单次预算 {count - limit:,} 字，将分段归纳"
             if over
-            else f"长文上限 {limit:,} 字 · 超出会保留最近部分"
+            else f"单次上下文 {limit:,} 字"
         )
 
     def _on_deep_toggled(self, enabled: bool) -> None:
@@ -366,23 +467,79 @@ class DecoderWindow(QMainWindow):
         )
 
     def _on_read_clicked(self) -> None:
+        if self._controller.collecting:
+            self._status_message("正在连续采集，先点「结束采集」再单次读取")
+            return
         if self._controller.busy:
             self._status_message("当前正在处理，请稍等")
             return
         region = self._controller.region
         if region is None:
-            self._start_region_select(capture_after=True)
+            self._start_region_select(pending="capture")
         else:
             self._controller.capture(region)
 
     def _on_reselect_clicked(self) -> None:
+        if self._controller.collecting:
+            self._status_message("正在连续采集，先点「结束采集」再重新框选")
+            return
         if self._controller.busy:
             self._status_message("当前正在处理，请稍等")
             return
-        self._start_region_select(capture_after=False)
+        self._start_region_select(pending=None)
 
-    def _start_region_select(self, *, capture_after: bool) -> None:
-        self._capture_after_select = capture_after
+    def _on_collect_clicked(self) -> None:
+        """「开始采集」: reuse the existing region when possible."""
+        if self._controller.collecting:
+            self._status_message("正在采集，先点「结束采集」")
+            return
+        if self._controller.busy:
+            self._status_message("正在处理，请稍等再开始采集")
+            return
+        region = self._controller.region
+        if region is None:
+            self._start_region_select(pending="collect")
+            return
+        self._begin_collection(region)
+
+    def _on_stop_collect_clicked(self) -> None:
+        if not self._controller.collecting:
+            return
+        self._controller.stop_collection()
+        self._stop_collect_button.setEnabled(False)
+
+    def _begin_collection(self, region) -> None:
+        """Kick off collection; the strip is then driven by session signals."""
+        if self._settings.always_on_top and self._controller.window_selection is None:
+            self._status_message(
+                "窗口置顶可能挡住聊天区域；采集时建议在设置里关掉置顶"
+            )
+        if not self._controller.start_collection(region):
+            self._set_collect_hint(COLLECT_IDLE_TEXT, MUTED)
+            return
+        # Do not touch the copy here: start_collection already emitted
+        # 「等待滚动」→「采集中」, and overriding it afterwards would show a
+        # stale state. Button enablement comes from collection_status.
+
+    def _start_region_select(self, *, pending: str | None) -> None:
+        """Open the selector; ``pending`` decides what happens afterwards."""
+        self._pending_action = pending
+        if pending == "collect":
+            self._set_collect_hint(COLLECT_ARMING_TEXT, AMBER)
+        if sys.platform == "win32" and QGuiApplication.platformName() == "windows":
+            picker = WindowPicker(self)
+            try:
+                choice = picker.exec()
+                if choice == QDialog.DialogCode.Accepted and picker.selection is not None:
+                    self._controller.set_window_selection(picker.selection)
+                    self._finish_source_selection(picker.selection.region, delay_ms=0)
+                    return
+                if choice != WindowPicker.UseDesktop:
+                    self._on_region_cancelled()
+                    return
+            finally:
+                picker.deleteLater()
+
         self._selector = RegionSelector(self)
         self._selector.region_selected.connect(self._on_region_selected)
         self._selector.selection_cancelled.connect(self._on_region_cancelled)
@@ -391,19 +548,33 @@ class DecoderWindow(QMainWindow):
         except Exception as exc:
             logger.exception("failed to open region selector")
             self._selector = None
+            self._pending_action = None
             self._status_message(f"无法打开区域选择器：{exc}")
 
     def _on_region_selected(self, region) -> None:
         self._selector = None
         self._controller.set_region(region)
+        # Let the desktop overlay disappear before the first screenshot.
+        self._finish_source_selection(region, delay_ms=120)
+
+    def _finish_source_selection(self, region, *, delay_ms):
         self._update_region_strip()
-        if self._capture_after_select:
-            QTimer.singleShot(120, lambda: self._controller.capture(region))
+        action, self._pending_action = self._pending_action, None
+        if action == "capture":
+            QTimer.singleShot(delay_ms, lambda: self._controller.capture(region))
+        elif action == "collect":
+            QTimer.singleShot(delay_ms, lambda: self._begin_collection(region))
 
     def _on_region_cancelled(self) -> None:
         self._selector = None
+        if self._pending_action == "collect":
+            self._set_collect_hint(COLLECT_IDLE_TEXT, MUTED)
+        self._pending_action = None
 
     def _on_analyze_clicked(self) -> None:
+        if self._controller.collecting:
+            self._status_message("正在连续采集，先点「结束采集」再解读")
+            return
         if self._controller.busy:
             self._status_message("正在解读，请稍等")
             return
@@ -414,6 +585,52 @@ class DecoderWindow(QMainWindow):
 
     def _on_clear_text(self) -> None:
         self._editor.clear()
+        self._controller.forget_conversation()
+        self._controller.clear_images(announce=False)
+
+    # ---- clipboard / export ------------------------------------------------
+    def _on_copy_text(self) -> None:
+        text = self._editor.toPlainText()
+        if not text.strip():
+            self._status_message("编辑区没有文字，无可复制")
+            return
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:  # pragma: no cover - headless
+            self._status_message("当前环境没有剪贴板")
+            return
+        clipboard.setText(text)
+        self._status_message(f"已复制 {len(text):,} 字到剪贴板")
+
+    def _on_export_text(self) -> None:
+        text = self._editor.toPlainText()
+        if not text.strip():
+            self._status_message("编辑区没有文字，无可导出")
+            return
+        default_name = f"言外-聊天记录-{time.strftime('%Y%m%d-%H%M')}.txt"
+        base_dir = Path.home() / "Documents"
+        if not base_dir.exists():
+            base_dir = Path.home()
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出聊天记录（UTF-8）",
+            str(base_dir / default_name),
+            "文本文件 (*.txt)",
+        )
+        if not path:
+            return
+        try:
+            self.write_text_file(path, text)
+        except Exception as exc:
+            logger.exception("export failed")
+            self._status_message(f"导出失败：{exc}")
+            return
+        self._last_export_path = path
+        self._status_message(f"已导出：{path}")
+
+    @staticmethod
+    def write_text_file(path: str, text: str) -> None:
+        """Write UTF-8 without BOM and with '\n' newlines (paper-appendix safe)."""
+        Path(path).write_text(text, encoding="utf-8", newline="\n")
 
     def _on_clear_images(self) -> None:
         self._controller.clear_images()
@@ -446,12 +663,16 @@ class DecoderWindow(QMainWindow):
             self._analysis_card.set_hint("理解中…")
         elif state == "错误":
             self._analysis_card.set_hint("出现问题")
+        # Only a decode owns the primary button title; collection must not
+        # relabel it, otherwise the user thinks the text is being analysed.
+        self._analyze_button.setText(
+            "解读中…" if state == "解读中" else "解读这段对话"
+        )
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._read_button.setEnabled(not busy)
         self._reselect_button.setEnabled(not busy)
         self._analyze_button.setEnabled(not busy)
-        self._analyze_button.setText("解读中…" if busy else "解读这段对话")
 
     def _on_engine_status(self, status: str) -> None:
         self._status_bar_engine(status)
@@ -469,6 +690,17 @@ class DecoderWindow(QMainWindow):
 
     def _update_vision_caption(self) -> None:
         count = self._controller.image_count
+        if self._collection_preview_state:
+            text, color, tone = {
+                "等待滚动": ("正在连接实时画面", MUTED, "muted"),
+                "采集中": ("实时画面 · 仅本地预览", GREEN, "safe"),
+                "暂停": ("实时画面已暂停", AMBER, "warn"),
+                "收尾": ("实时画面已结束 · 正在整理记录", MUTED, "muted"),
+            }[self._collection_preview_state]
+            self._vision_caption.setText(text)
+            self._vision_dot.set_color(color)
+            set_tone(self._vision_caption, tone)
+            return
         if not self._settings.vision_enabled:
             self._vision_caption.setText(
                 f"画面仅本地预览 · 已附带 {count} 张不发送" if count else "画面仅本地预览 · 不发送"
@@ -481,16 +713,47 @@ class DecoderWindow(QMainWindow):
             self._vision_dot.set_color(AMBER)
             set_tone(self._vision_caption, "warn")
         else:
-            self._vision_caption.setText("尚未读取画面 · 可粘贴文本或框选一次")
+            self._vision_caption.setText("暂无画面附件")
             self._vision_dot.set_color(MUTED)
             set_tone(self._vision_caption, "muted")
 
+    def _show_conversation(self, conversation) -> None:
+        if conversation is None or (conversation.kind == "unknown" and not conversation.title):
+            self._conversation_label.hide()
+            return
+        kind = {"group": "群聊", "private": "私聊", "unknown": "类型待确认"}[conversation.kind]
+        if conversation.tentative:
+            kind = f"疑似{kind}"
+        text = f"{kind} · {conversation.title}" if conversation.title else kind
+        self._conversation_label.setText(text)
+        self._conversation_label.setToolTip(f"<span>{escape(conversation.reason)}</span>")
+        self._conversation_label.show()
+
+    def _replace_when_read(self) -> None:
+        self._replace_next_capture = True
+
+    def _replace_transcript(self, text: str) -> None:
+        cursor = QTextCursor(self._editor.document())
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(text)
+        cursor.endEditBlock()
+
+    def _maybe_analyze_capture(self) -> None:
+        if self._auto_analysis.isChecked() and (self._editor.toPlainText().strip() or self._controller.image_count):
+            QTimer.singleShot(0, self._on_analyze_clicked)
+
     def _on_capture_completed(self, text: str) -> None:
+        replace, self._replace_next_capture = self._replace_next_capture, False
         if not text.strip():
+            if replace:
+                self._replace_transcript("")
+            if not self._editor.toPlainText().strip():
+                self._maybe_analyze_capture()
             return
         existing = self._editor.toPlainText().strip()
-        if not existing:
-            self._editor.setPlainText(text)
+        if replace or not existing:
+            self._replace_transcript(text)
         else:
             old_lines = existing.splitlines()
             new_lines = text.splitlines()
@@ -508,6 +771,112 @@ class DecoderWindow(QMainWindow):
         cursor.movePosition(cursor.MoveOperation.End)
         self._editor.setTextCursor(cursor)
         self._editor.ensureCursorVisible()
+        self._maybe_analyze_capture()
+
+    # ---- continuous collection --------------------------------------------
+    def _set_collect_hint(self, text: str, color) -> None:
+        self._collect_label.setText(text)
+        self._collect_dot.set_color(color)
+        # Breathing dot while the session can still pick up frames.
+        self._collect_dot.set_pulse(color in (CYAN, AMBER))
+
+    def _on_collection_state_changed(self, state: str) -> None:
+        previous = self._collection_preview_state
+        placeholder = {
+            "等待滚动": "正在连接所选区域…",
+            "采集中": "正在等待实时画面…",
+            "暂停": "画面已暂停，恢复所选聊天窗口后继续",
+            "收尾": "已结束实时画面，正在整理聊天记录",
+        }.get(state, "")
+        self._collection_preview_state = state if placeholder else ""
+        self._preview.set_placeholder(placeholder)
+        if not previous and self._collection_preview_state:
+            self._tools_tabs.setCurrentIndex(0)
+        self._update_vision_caption()
+        if state == "等待滚动":
+            self._set_collect_hint(COLLECT_ARMING_TEXT, AMBER)
+        elif state == "采集中":
+            self._set_collect_hint(COLLECT_RUNNING_TEXT, CYAN)
+        elif state == "暂停":
+            self._set_collect_hint(COLLECT_PAUSED_TEXT, AMBER)
+        elif state == "收尾":
+            self._set_collect_hint(COLLECT_STOPPING_TEXT, AMBER)
+        elif state == "未采集":
+            self._set_collect_hint(COLLECT_IDLE_TEXT, MUTED)
+
+    def _on_collection_status(self, snapshot: dict) -> None:
+        collecting = bool(snapshot.get("collecting"))
+        stopping = bool(snapshot.get("stopping"))
+        lines = int(snapshot.get("lines", 0))
+        breakpoints = int(snapshot.get("breakpoints", 0))
+        queued = int(snapshot.get("queued", 0))
+        dropped = int(snapshot.get("dropped", 0))
+        frames = int(snapshot.get("frames", 0))
+
+        # Only refresh the counters while a session is alive. The final
+        # snapshot arrives after the stitcher is detached (it would report 0
+        # lines), so the authoritative post-run numbers come from
+        # _on_collection_completed instead.
+        if collecting or stopping:
+            parts: list[str] = []
+            if lines or frames:
+                parts.append(f"{lines} 行")
+            if breakpoints:
+                parts.append(f"断点 {breakpoints}")
+            if queued:
+                parts.append(f"队列 {queued}")
+            if dropped:
+                parts.append(f"丢帧 {dropped}")
+            self._collect_badge.setText(" · ".join(parts))
+            self._collect_badge.setVisible(bool(parts))
+        self._collect_button.setEnabled(not collecting and not stopping)
+        self._stop_collect_button.setEnabled(collecting)
+
+    def _on_collection_hint(self, message: str) -> None:
+        self._status_message(message)
+        self._pipeline.append_log(f"{time.strftime('%H:%M:%S')}  {message}")
+
+    def _on_collection_completed(self, payload: dict) -> None:
+        """Replace the editor content with the rebuilt transcript.
+
+        The replacement goes through a QTextCursor edit block, so Ctrl+Z still
+        restores whatever the user had pasted before starting the collection.
+        """
+        self._collection_preview_state = ""
+        self._preview.set_placeholder("")
+        self._update_vision_caption()
+        self._update_region_strip()
+        text = str(payload.get("text") or "")
+        lines = int(payload.get("lines", 0))
+        breakpoints = payload.get("breakpoints") or []
+        dropped = int(payload.get("dropped", 0))
+        pages = int(payload.get("pages", 0))
+
+        if not text.strip():
+            self._set_collect_hint(COLLECT_EMPTY_TEXT, RED)
+            self._collect_badge.setText("0 行")
+            self._collect_badge.show()
+            return
+
+        self._replace_transcript(text)
+        end_cursor = QTextCursor(self._editor.document())
+        end_cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._editor.setTextCursor(end_cursor)
+        self._editor.ensureCursorVisible()
+
+        self._set_collect_hint(COLLECT_DONE_TEXT, GREEN)
+        badge = [f"{lines} 行", f"{pages} 屏"]
+        if breakpoints:
+            badge.append(f"断点 {len(breakpoints)}")
+        if dropped:
+            badge.append(f"丢帧 {dropped}")
+        self._collect_badge.setText(" · ".join(badge))
+        self._collect_badge.show()
+        self._pipeline.append_log(
+            f"{time.strftime('%H:%M:%S')}  采集结果已写入编辑区 · {lines} 行 · "
+            f"{pages} 屏 · {len(breakpoints)} 个断点（Ctrl+Z 可撤销替换）"
+        )
+        self._maybe_analyze_capture()
 
     def _on_analysis_started(self) -> None:
         self._cards.set_updating(True)
@@ -520,10 +889,11 @@ class DecoderWindow(QMainWindow):
         self._cards.set_result(result)
         self._replies.set_replies(result.suggested_replies)
         self._thinking.finish(result.thinking, deep=self._deep_check.isChecked())
-        self._analysis_card.set_hint(
-            f"{result.emotion.label} · {int(result.emotion.confidence * 100)}%"
-            + (" · 视觉" if result.vision_used else "")
-        )
+        confidence = result.emotion.confidence
+        hint = result.emotion.label
+        if confidence is not None:
+            hint += f" · {confidence:.0%}"
+        self._analysis_card.set_hint(hint + (" · 视觉" if result.vision_used else ""))
         self._status_message("解读完成 · 回复只复制，不会自动发送")
 
     def _on_analysis_failed(self, message: str) -> None:
@@ -533,16 +903,24 @@ class DecoderWindow(QMainWindow):
         self._analysis_card.set_hint("解读失败")
 
     def _on_cleared(self) -> None:
+        self._replace_next_capture = False
         self._editor.clear()
         self._cards.clear_result()
         self._replies.clear_replies()
         self._thinking.reset()
+        self._collection_preview_state = ""
+        self._preview.set_placeholder("")
         self._preview.clear()
         self._pipeline.reset_stages()
         self._analysis_card.set_hint("一次解读")
         self._update_region_strip()
         self._update_vision_caption()
         self._status_bar.set_last_update(None)
+        self._set_collect_hint(COLLECT_IDLE_TEXT, MUTED)
+        self._collect_badge.setText("")
+        self._collect_badge.hide()
+        self._collect_button.setEnabled(True)
+        self._stop_collect_button.setEnabled(False)
 
     def _on_metrics(self, metrics: dict) -> None:
         self._status_bar.set_metrics(metrics)
@@ -560,13 +938,21 @@ class DecoderWindow(QMainWindow):
 
     def _update_region_strip(self) -> None:
         region = self._controller.region
+        selection = self._controller.window_selection
         if region is None:
-            self._region_label.setText("尚未选区 · 读取画面时会框选一次，不会持续监控")
+            self._region_label.setText("尚未选区 · 请选择聊天窗口，不会持续监控")
+            self._region_label.setToolTip("")
             self._region_dot.set_color(MUTED)
+        elif selection is not None:
+            title = selection.target.title
+            name = self._region_label.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, 250)
+            marker = " · 标题保护" if selection.marker is not None else ""
+            self._region_label.setText(f"窗口：{name} · {region.width} × {region.height}{marker}")
+            self._region_label.setToolTip(f"<span>{escape(title)}</span>")
+            self._region_dot.set_color(GREEN)
         else:
-            self._region_label.setText(
-                f"区域 ({region.x}, {region.y}) · {region.width} × {region.height} · 按需读取"
-            )
+            self._region_label.setText(f"屏幕区域 ({region.x}, {region.y}) · {region.width} × {region.height}")
+            self._region_label.setToolTip("")
             self._region_dot.set_color(GREEN)
 
     # ---------------------------------------------------------------- lifecycle
@@ -590,10 +976,14 @@ class DecoderWindow(QMainWindow):
             self.show()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        try:
-            if self._selector is not None:
-                self._selector.cancel()
-            self._controller.shutdown()
-        except Exception:
-            logger.exception("shutdown failed")
+        if self._selector is not None:
+            self._selector.cancel()
+        if self._controller.begin_shutdown():
+            self.centralWidget().setEnabled(False)
+            self._status_message("正在关闭，等待后台任务结束…")
+            if not self._close_timer.isActive():
+                self._close_timer.start()
+            event.ignore()
+            return
+        self._close_timer.stop()
         event.accept()

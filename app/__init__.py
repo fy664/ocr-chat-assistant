@@ -1,3 +1,3 @@
-"""OCR Chat Assistant - Windows V1."""
+"""言外 · OCR Chat Assistant for Windows."""
 
-__version__ = "1.0.0"
+__version__ = "2.1.0"

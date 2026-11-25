@@ -1,3 +1,5 @@
+> **历史规格**。本文描述 V1 实时监控方案。当前功能与结构见 [README](README.md) 和 [项目骨架](docs/ARCHITECTURE.md)。
+
 # OCR Chat Assistant
 ## Windows 实时聊天语义分析助手 V1.0
 ### Claude Code 一次性实施规格 / Product Specification / Engineering Contract

@@ -236,7 +236,7 @@ class PipelineScheduler(QObject):
         self._region = region
         try:
             self._settings.region = region.model_dump()
-            self._settings.save()
+            self._settings.save(write_api_key=False)
         except Exception as exc:
             logger.warning("failed to persist region: %s", exc)
         self._monitor.set_region(region)

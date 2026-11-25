@@ -25,10 +25,12 @@ class RegionMonitor(QObject):
         region: ScreenRegion | None = None,
         interval_ms: int = 2000,
         parent=None,
+        *,
+        capture=None,
     ) -> None:
         super().__init__(parent)
         self._region = region
-        self._capture = ScreenCapture()
+        self._capture = capture if capture is not None else ScreenCapture()
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
         self._timer.timeout.connect(self._tick)

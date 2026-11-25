@@ -7,6 +7,8 @@ import time
 from app.llm.provider import ConnectionTestResult, LLMError
 from app.models.schemas import (
     AnalysisResult,
+    ConversationSummary,
+    RecentChatEvent,
     EmotionResult,
     SuggestedReply,
 )
@@ -31,6 +33,12 @@ MOCK_RESULT = AnalysisResult(
         SuggestedReply(style="简短", text="好的", why="快速确认"),
     ],
     uncertainty="这是测试数据",
+    conversation_summary=ConversationSummary(
+        overview="这是一份演示总结。对话中的发言者讨论了一个待确认的安排。",
+        timeline=["提出安排", "等待确认"], open_questions=["确认下一步安排"],
+    ),
+    recent_event=RecentChatEvent(topic="确认安排", description="最近一条消息在推进一项安排。",
+                                evidence_ids=["M0001"], needs_reply=True),
     thinking=MOCK_THINKING,
     evidence=["测试消息"],
     alternatives=["这条消息也可能只是示例，不包含真实意图"],

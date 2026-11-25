@@ -3,14 +3,14 @@
 这里生成两个东西：
 
 1. `_packaging/portable/`：可整体复制的便携运行时（Python embeddable + 依赖 + 源码）；
-2. `_packaging/dist/setup.exe`：Windows 安装程序（Inno Setup，按用户安装，无管理员权限）。
+2. `_packaging/dist/Yanwai-Setup-2.1.0.exe`：Windows 安装程序（Inno Setup，按用户安装，无管理员权限）。
 
 ## 前置
 
 - 已在项目根目录运行 `.\setup.ps1`（`.venv` 依赖完整）；
 - Windows 10/11 x64；
 - Inno Setup 6（提供 `ISCC.exe`；本机可放在 `_packaging/inno/ISCC.exe`，或安装到默认目录）；
-- 可访问 python.org（首次下载 Python 3.12 embeddable）。
+- 可访问 python.org（首次下载与虚拟环境匹配的 Python embeddable）。
 
 ## 构建
 
@@ -18,7 +18,7 @@
 # 1) 便携运行时（约 1.3GB；会把当前 .venv 的运行依赖复制进去）
 .\packaging\build_portable.ps1
 
-# 2) 安装程序（输出到 _packaging\dist\setup.exe）
+# 2) 安装程序（输出到 _packaging\dist）
 .\_packaging\inno\ISCC.exe .\packaging\Yanwai.iss
 ```
 
@@ -28,10 +28,12 @@
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\packaging\Yanwai.iss
 ```
 
+构建目录已经存在时，构建会保留原目录。用 `-OutputRoot` 指定新目录，并通过 Inno Setup 的 `/DPortableDir=绝对路径` 指定对应载荷。
+
 ## 安全边界
 
 - `build_portable.ps1` 只复制：
-  - `app/`、`assets/`、`run.py`、`README.md`
+  - `app/`、`assets/` 和 `run.py`
   - 当前 `.venv\Lib\site-packages`（运行依赖）
   - Python embeddable
 - **不会复制**：`.env`、`config.json`、`%APPDATA%`、keyring、日志、测试、`.git`、项目配置。
@@ -40,7 +42,7 @@
 
 ## 发布
 
-把 `_packaging\dist\setup.exe` 作为 GitHub Release 资产上传即可；不要把安装包提交进 Git（`.gitignore` 已忽略 `_packaging/`）。
+把 `_packaging\dist\Yanwai-Setup-2.1.0.exe` 作为 GitHub Release 资产上传即可；不要把安装包提交进 Git（`.gitignore` 已忽略 `_packaging/`）。
 
 当前 GitHub Release：<https://github.com/fy664/ocr-chat-assistant/releases>
 

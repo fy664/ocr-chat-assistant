@@ -88,6 +88,55 @@ QLabel#shortcutHint {
     font-size: 9px;
 }
 
+/* ---------- continuous scrolling collection strip ---------- */
+QFrame#collectStrip {
+    background-color: rgba(129, 140, 248, 0.055);
+    border: 1px solid rgba(129, 140, 248, 0.16);
+    border-radius: 10px;
+}
+QLabel#collectText {
+    color: #a9b6d0;
+    font-size: 10px;
+}
+QLabel#collectBadge {
+    color: #8fa1b8;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 9px;
+}
+QPushButton#collectStart {
+    background-color: rgba(129, 140, 248, 0.20);
+    border: 1px solid rgba(129, 140, 248, 0.38);
+    border-radius: 7px;
+    color: #dbe2ff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 12px;
+}
+QPushButton#collectStart:hover { background-color: rgba(129, 140, 248, 0.32); }
+QPushButton#collectStart:disabled {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #5f6d83;
+}
+QPushButton#collectStop {
+    background-color: rgba(251, 191, 36, 0.18);
+    border: 1px solid rgba(251, 191, 36, 0.36);
+    border-radius: 7px;
+    color: #fde2a3;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 12px;
+}
+QPushButton#collectStop:hover { background-color: rgba(251, 191, 36, 0.30); }
+QPushButton#collectStop:disabled {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #5f6d83;
+}
+
 /* ---------- section cards ---------- */
 QFrame#sectionCard {
     background-color: rgba(255, 255, 255, 0.034);
